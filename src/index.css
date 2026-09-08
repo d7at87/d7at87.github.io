@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ivory-50: #faf7f1;
+  --color-ivory-100: #f3eee3;
+  --color-ivory-200: #e8e0cd;
+  --color-ivory-300: #d8cbae;
+  --color-ink-950: #14110b;
+  --color-ink-900: #1e1a12;
+  --color-ink-700: #453c2d;
+  --color-ink-500: #7c7060;
+  --color-gold-200: #e9d6ab;
+  --color-gold-300: #dfc084;
+  --color-gold-400: #cfa64f;
+  --color-gold-500: #b08d3e;
+  --color-gold-600: #8a6c2a;
+  --color-night-950: #0a0806;
+  --color-night-900: #100d09;
+  --font-display: "Tajawal", "Heebo", "Segoe UI", system-ui, sans-serif;
+  --font-royal: "Amiri", "Heebo", "Tajawal", serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-ivory-50);
+  color: var(--color-ink-900);
+  font-family: var(--font-display);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(176, 141, 62, 0.28);
+  color: var(--color-ink-950);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ivory-100);
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--color-gold-500), #6e5620);
+  border-radius: 8px;
+}
+
+.eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.text-gold-gradient {
+  background: linear-gradient(120deg, #8a6c2a 0%, #b08d3e 45%, #cfa64f 70%, #8a6c2a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid rgba(20, 17, 11, 0.09);
+}
+
+.hairline {
+  border-color: rgba(20, 17, 11, 0.12);
+}
+
+.blueprint-grid {
+  background-image:
+    linear-gradient(rgba(20, 17, 11, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 17, 11, 0.07) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.scanline {
+  position: relative;
+  overflow: hidden;
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: -40%;
+  height: 40%;
+  background: linear-gradient(to bottom, transparent, rgba(176, 141, 62, 0.14), transparent);
+  animation: scan 4.5s linear infinite;
+  pointer-events: none;
+}
+@keyframes scan {
+  to {
+    top: 140%;
+  }
+}
+
+.shimmer-sweep {
+  position: relative;
+  overflow: hidden;
+  pointer-events: none;
+}
+.shimmer-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-160%);
+  background: linear-gradient(105deg, transparent 30%, rgba(176, 141, 62, 0.12) 50%, transparent 70%);
+  transition: transform 0.9s ease;
+}
+.group:hover .shimmer-sweep::after {
+  transform: translateX(160%);
+}
+
+.marquee {
+  animation: marquee 32s linear infinite;
+}
+@keyframes marquee {
+  to {
+    transform: translateX(50%);
+  }
+}
+
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.blob {
+  animation: drift 20s ease-in-out infinite alternate;
+}
+@keyframes drift {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(40px, -30px) scale(1.08);
+  }
+  100% {
+    transform: translate(-30px, 25px) scale(0.96);
+  }
+}
+
+.dust {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: rgba(176, 141, 62, 0.5);
+  animation: dust 10s ease-in-out infinite;
+}
+@keyframes dust {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.12;
+  }
+  50% {
+    transform: translateY(-30px);
+    opacity: 0.55;
+  }
+}
+
+html[lang='he'] body {
+  font-family: "Heebo", "Tajawal", system-ui, sans-serif;
+}
+
+:root {
+  --h-scale: 1;
+  --b-scale: 1;
+}
+
+.text-xs { font-size: calc(0.75rem * var(--b-scale)); }
+.text-sm { font-size: calc(0.875rem * var(--b-scale)); }
+.text-lg { font-size: calc(1.125rem * var(--b-scale)); }
+.text-xl { font-size: calc(1.25rem * var(--b-scale)); }
+.text-2xl { font-size: calc(1.5rem * var(--b-scale)); }
+.font-royal.text-xl { font-size: calc(1.25rem * var(--h-scale)); }
+.font-royal.text-2xl { font-size: calc(1.5rem * var(--h-scale)); }
+.font-royal.text-3xl { font-size: calc(1.875rem * var(--h-scale)); }
+.font-royal.text-4xl { font-size: calc(2.25rem * var(--h-scale)); }
+.font-royal.text-5xl { font-size: calc(3rem * var(--h-scale)); }
+.font-royal.text-6xl { font-size: calc(3.75rem * var(--h-scale)); }
+.font-royal.text-7xl { font-size: calc(4.5rem * var(--h-scale)); }
+.font-royal.text-8xl { font-size: calc(6rem * var(--h-scale)); }
+.font-royal.text-\[22px\] { font-size: calc(22px * var(--h-scale)); }
+
+canvas {
+  touch-action: pan-y;
+}

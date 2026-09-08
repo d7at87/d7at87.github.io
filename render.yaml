@@ -1,0 +1,11 @@
+# Render Blueprint — deploys this Vite site as a Static Site.
+# In Render: New → Blueprint → connect the repo containing this file.
+services:
+  - type: web
+    name: scentro
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 24.18.0
