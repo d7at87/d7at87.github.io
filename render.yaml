@@ -9,3 +9,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 24.18.0
+      # Optional cloud backend (see SYNC.md). Leave blank to keep local mode.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false

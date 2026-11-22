@@ -1,41 +1,35 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Category, Content, Lang, LText, Product, Settings, SiteData, VideoItem } from './types'
-import { SEED_CATEGORIES, SEED_BRANDS, SEED_PRODUCTS, SEED_VIDEOS } from './seedCatalog'
-import { SEED_CONTENT, SEED_SETTINGS, SEED_UI } from './seedSite'
+import { normalizeSiteData, seedData } from './normalize'
+import { migrateMediaToRemote } from './migrate'
+import { fetchSite, getSession, pushSite, remoteConfigured, signInRemote, signOutRemote } from './remote'
 
 const LS_DATA = 'ashour-cms-v1'
 const LS_LANG = 'ashour-lang'
 
-function seedData(): SiteData {
-  return {
-    products: SEED_PRODUCTS,
-    categories: SEED_CATEGORIES,
-    brands: SEED_BRANDS,
-    videos: SEED_VIDEOS,
-    content: SEED_CONTENT,
-    ui: SEED_UI,
-    settings: SEED_SETTINGS,
-  }
-}
+export type SyncStatus = 'local' | 'loading' | 'ready' | 'saving' | 'error'
 
-function loadData(): SiteData {
+function readCache(): SiteData {
   try {
     const raw = localStorage.getItem(LS_DATA)
-    if (!raw) return seedData()
-    const parsed = JSON.parse(raw) as Partial<SiteData>
-    const seed = seedData()
-    return {
-      products: Array.isArray(parsed.products) && parsed.products.length ? parsed.products : seed.products,
-      categories: Array.isArray(parsed.categories) && parsed.categories.length ? parsed.categories : seed.categories,
-      brands: Array.isArray(parsed.brands) && parsed.brands.length ? parsed.brands : seed.brands,
-      videos: Array.isArray(parsed.videos) ? parsed.videos : seed.videos,
-      content: { ...seed.content, ...(parsed.content || {}) },
-      ui: { ...seed.ui, ...(parsed.ui || {}) },
-      settings: { ...seed.settings, ...(parsed.settings || {}) },
-    }
+    return raw ? normalizeSiteData(JSON.parse(raw)) : seedData()
   } catch {
     return seedData()
   }
+}
+
+function readLang(data: SiteData): Lang {
+  try {
+    const saved = localStorage.getItem(LS_LANG)
+    if (saved === 'ar' || saved === 'he') return saved
+  } catch {
+    /* ignore */
+  }
+  return data.settings.defaultLang
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error && e.message ? e.message : 'حدث خطأ غير متوقع'
 }
 
 interface SiteCtx {
@@ -57,29 +51,139 @@ interface SiteCtx {
   patchSettings: (s: Partial<Settings>) => void
   replaceAll: (d: SiteData) => void
   resetAll: () => void
+  /* publishing */
+  remote: boolean
+  user: string | null
+  status: SyncStatus
+  message: string
+  dirty: boolean
+  lastPublished: string | null
+  publish: () => Promise<boolean>
+  pull: () => Promise<boolean>
+  signIn: (email: string, password: string) => Promise<string | null>
+  signOut: () => void
 }
 
 const Ctx = createContext<SiteCtx | null>(null)
 
 export function SiteProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<SiteData>(loadData)
-  const [lang, setLangState] = useState<Lang>(() => {
+  const [data, setData] = useState<SiteData>(readCache)
+  const [lang, setLangState] = useState<Lang>(() => readLang(readCache()))
+  const [dirty, setDirty] = useState(false)
+  const [status, setStatus] = useState<SyncStatus>(remoteConfigured ? 'loading' : 'local')
+  const [message, setMessage] = useState('')
+  const [lastPublished, setLastPublished] = useState<string | null>(null)
+  const [user, setUser] = useState<string | null>(() => getSession()?.email ?? null)
+
+  /* Every mutation goes through here: updates state and flags unsaved work. */
+  const commit = useCallback((fn: (d: SiteData) => SiteData) => {
+    setData((d) => fn(d))
+    if (remoteConfigured) setDirty(true)
+  }, [])
+
+  const pull = useCallback(async () => {
+    if (!remoteConfigured) return false
+    setStatus('loading')
     try {
-      const saved = localStorage.getItem(LS_LANG) as Lang | null
-      if (saved === 'ar' || saved === 'he') return saved
-    } catch {
-      /* ignore */
+      const remote = await fetchSite()
+      if (remote) {
+        setData(normalizeSiteData(remote.data))
+        setLastPublished(remote.updatedAt)
+        setDirty(false)
+        setMessage('تم تحديث البيانات من الخادم')
+      } else {
+        setMessage('لا توجد نسخة منشورة بعد — عدّل ثم اضغط «نشر الآن»')
+      }
+      setStatus('ready')
+      return true
+    } catch (e) {
+      setStatus('error')
+      setMessage(errorText(e))
+      return false
     }
-    return loadData().settings.defaultLang
-  })
+  }, [])
 
   useEffect(() => {
+    if (remoteConfigured) void pull()
+  }, [pull])
+
+  const publish = useCallback(async () => {
+    if (!remoteConfigured) return false
+    setStatus('saving')
+    setMessage('جارٍ تجهيز الملفات والنشر...')
+    try {
+      const migrated = await migrateMediaToRemote(data)
+      await pushSite(migrated.data)
+      if (migrated.moved > 0) setData(migrated.data)
+      setDirty(false)
+      setLastPublished(new Date().toISOString())
+      setStatus('ready')
+      if (migrated.failed > 0) {
+        setMessage(`نُشر الموقع، لكن ${migrated.failed} ملف وسائط لم يُرفع — أعد المحاولة`)
+      } else if (migrated.moved > 0) {
+        setMessage(`تم النشر — رُفع ${migrated.moved} ملف وسائط إلى السحابة`)
+      } else {
+        setMessage('تم النشر بنجاح — التعديلات ظاهرة الآن لكل الزوار')
+      }
+      return true
+    } catch (e) {
+      setStatus('error')
+      setMessage(errorText(e))
+      return false
+    }
+  }, [data])
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    try {
+      const session = await signInRemote(email, password)
+      setUser(session.email)
+      setStatus('ready')
+      setMessage('تم تسجيل الدخول')
+      return null
+    } catch (e) {
+      return errorText(e)
+    }
+  }, [])
+
+  const signOut = useCallback(() => {
+    signOutRemote()
+    setUser(null)
+    setMessage('')
+  }, [])
+
+  /* ---------------- Auto-publish (opt-in, after 3s of silence) ---------------- */
+  useEffect(() => {
+    if (!remoteConfigured || !user || status !== 'ready') return
+    if (!dirty || !data.settings.autoPublish) return
+    const t = setTimeout(() => {
+      void publish()
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [remoteConfigured, user, status, dirty, data, publish])
+
+  /* With the cloud as source of truth, the admin has no device copy — visitors
+     read the cloud; a local draft would only mislead the admin. */
+  const signedInCloud = remoteConfigured && Boolean(user)
+
+  useEffect(() => {
+    if (signedInCloud) return
     try {
       localStorage.setItem(LS_DATA, JSON.stringify(data))
     } catch {
       /* storage full — ignore */
     }
-  }, [data])
+  }, [data, signedInCloud])
+
+  /* Never lose unpublished edits silently. */
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
 
   useEffect(() => {
     try {
@@ -97,7 +201,10 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     const L = (v: LText) => v?.[lang] ?? v?.ar ?? ''
     const formatPrice = (n: number) =>
       `${n.toLocaleString(lang === 'ar' ? 'ar-EG' : 'he-IL')} ${data.settings.currency[lang] ?? data.settings.currency.ar}`
-    const catName = (id: string) => data.categories.find((c) => c.id === id)?.name[lang] ?? data.categories.find((c) => c.id === id)?.name.ar ?? id
+    const catName = (id: string) => {
+      const cat = data.categories.find((c) => c.id === id)
+      return cat ? (cat.name[lang] ?? cat.name.ar) : id
+    }
     return {
       lang,
       setLang,
@@ -107,38 +214,44 @@ export function SiteProvider({ children }: { children: ReactNode }) {
       formatPrice,
       catName,
       saveProduct: (p) =>
-        setData((d) => ({
+        commit((d) => ({
           ...d,
           products: d.products.some((x) => x.id === p.id)
             ? d.products.map((x) => (x.id === p.id ? p : x))
             : [...d.products, p],
         })),
-      deleteProduct: (id) => setData((d) => ({ ...d, products: d.products.filter((x) => x.id !== id) })),
+      deleteProduct: (id) => commit((d) => ({ ...d, products: d.products.filter((x) => x.id !== id) })),
       saveCategory: (c) =>
-        setData((d) => ({
+        commit((d) => ({
           ...d,
           categories: d.categories.some((x) => x.id === c.id)
             ? d.categories.map((x) => (x.id === c.id ? c : x))
             : [...d.categories, c],
         })),
       deleteCategory: (id) => {
-        let ok = false
-        setData((d) => {
-          if (d.products.some((p) => p.categoryId === id)) return d
-          ok = true
-          return { ...d, categories: d.categories.filter((x) => x.id !== id) }
-        })
-        return ok
+        if (data.products.some((p) => p.categoryId === id)) return false
+        commit((d) => ({ ...d, categories: d.categories.filter((x) => x.id !== id) }))
+        return true
       },
-      setBrands: (brands) => setData((d) => ({ ...d, brands })),
-      setVideos: (videos) => setData((d) => ({ ...d, videos })),
-      setContent: (content) => setData((d) => ({ ...d, content })),
-      setUI: (ui) => setData((d) => ({ ...d, ui })),
-      patchSettings: (s) => setData((d) => ({ ...d, settings: { ...d.settings, ...s } })),
-      replaceAll: (d) => setData(d),
-      resetAll: () => setData(seedData()),
+      setBrands: (brands) => commit((d) => ({ ...d, brands })),
+      setVideos: (videos) => commit((d) => ({ ...d, videos })),
+      setContent: (content) => commit((d) => ({ ...d, content })),
+      setUI: (ui) => commit((d) => ({ ...d, ui })),
+      patchSettings: (s) => commit((d) => ({ ...d, settings: { ...d.settings, ...s } })),
+      replaceAll: (d) => commit(() => normalizeSiteData(d)),
+      resetAll: () => commit(() => seedData()),
+      remote: remoteConfigured,
+      user,
+      status,
+      message,
+      dirty,
+      lastPublished,
+      publish,
+      pull,
+      signIn,
+      signOut,
     }
-  }, [data, lang])
+  }, [data, lang, commit, user, status, message, dirty, lastPublished, publish, pull, signIn, signOut])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

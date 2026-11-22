@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Download,
   Eye,
@@ -19,10 +19,14 @@ import {
   ArrowDown,
   Copy,
   ImagePlus,
+  CloudUpload,
+  CloudOff,
+  RefreshCw,
 } from 'lucide-react'
 import type { Category, Content, LText, Product } from '../cms/types'
 import { useSite } from '../cms/store'
-import { compressImage, saveMedia, useMediaURL } from '../cms/media'
+import { compressImage, saveMediaSmart, useMediaURL } from '../cms/media'
+import { deleteMedia, listMediaObjects, type MediaObject } from '../cms/remote'
 import BottleSVG from '../components/BottleSVG'
 
 const inp =
@@ -75,52 +79,89 @@ const TABS: { id: Tab; label: string; icon: typeof Package }[] = [
 ]
 
 export default function Admin() {
-  const { data } = useSite()
+  const { data, remote, user, signIn, signOut } = useSite()
   const [authed, setAuthed] = useState(() => {
+    if (remote) return Boolean(user)
     try {
       return sessionStorage.getItem('ashour-admin') === '1'
     } catch {
       return false
     }
   })
-  const [pin, setPin] = useState('')
-  const [pinErr, setPinErr] = useState(false)
+  const [secret, setSecret] = useState('')
+  const [email, setEmail] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState<Tab>('products')
 
   if (!authed) {
+    const submit = async (e: React.FormEvent) => {
+      e.preventDefault()
+      setErr('')
+      if (remote) {
+        setBusy(true)
+        const problem = await signIn(email.trim(), secret)
+        setBusy(false)
+        if (problem) {
+          setErr(problem)
+          return
+        }
+        setAuthed(true)
+        return
+      }
+      if (secret === data.settings.pin) {
+        try {
+          sessionStorage.setItem('ashour-admin', '1')
+        } catch {
+          /* ignore */
+        }
+        setAuthed(true)
+      } else setErr('رمز خاطئ')
+    }
+
     return (
       <div className="grid min-h-screen place-items-center bg-ivory-100 p-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (pin === data.settings.pin) {
-              try {
-                sessionStorage.setItem('ashour-admin', '1')
-              } catch {
-                /* ignore */
-              }
-              setAuthed(true)
-            } else setPinErr(true)
-          }}
-          className="w-full max-w-sm border border-ink-950/10 bg-white p-8 text-center shadow-xl"
-        >
+        <form onSubmit={submit} className="w-full max-w-sm border border-ink-950/10 bg-white p-8 text-center shadow-xl">
           <p className="font-royal text-3xl font-bold text-ink-950">لوحة التحكم</p>
-          <p className="mt-2 text-sm text-ink-500">أدخل رمز الدخول (الافتراضي 1234)</p>
+          <p className="mt-2 text-sm text-ink-500">
+            {remote ? 'سجّل الدخول بحساب المشرف — التعديلات تُنشر لكل الزوار' : 'أدخل رمز الدخول (الافتراضي 1234)'}
+          </p>
+          {remote && (
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={`${inp} mt-4 text-start`}
+              placeholder="admin@example.com"
+              dir="ltr"
+              autoComplete="username"
+              autoFocus
+            />
+          )}
           <input
             type="password"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            className={`${inp} mt-5 text-center tracking-[0.5em]`}
-            placeholder="••••"
-            autoFocus
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            className={remote ? `${inp} mt-2` : `${inp} mt-5 text-center tracking-[0.5em]`}
+            placeholder={remote ? 'كلمة المرور' : '••••'}
+            autoComplete={remote ? 'current-password' : 'off'}
+            autoFocus={!remote}
           />
-          {pinErr && <p className="mt-2 text-xs text-red-700">رمز خاطئ</p>}
-          <button className="mt-4 w-full bg-ink-950 py-3 text-sm font-bold text-ivory-50 transition hover:bg-gold-600">
-            دخول
+          {err && <p className="mt-2 text-xs text-red-700">{err}</p>}
+          <button
+            disabled={busy || !secret || (remote && !email)}
+            className="mt-4 w-full bg-ink-950 py-3 text-sm font-bold text-ivory-50 transition hover:bg-gold-600 disabled:opacity-40"
+          >
+            {busy ? 'جارٍ الدخول...' : 'دخول'}
           </button>
           <a href="#" className="mt-4 inline-block text-xs text-ink-500 underline">
             عودة للموقع
           </a>
+          {!remote && (
+            <p className="mt-3 text-[11px] leading-5 text-ink-500">
+              وضع محلي: التعديلات تُحفظ في هذا المتصفح فقط. راجع SYNC.md لتفعيل النشر للزوار.
+            </p>
+          )}
         </form>
       </div>
     )
@@ -143,11 +184,13 @@ export default function Admin() {
             </a>
             <button
               onClick={() => {
+                if (remote) signOut()
                 try {
                   sessionStorage.removeItem('ashour-admin')
                 } catch {
                   /* ignore */
                 }
+                setAuthed(false)
                 window.location.hash = ''
               }}
               className="flex items-center gap-1.5 border border-ink-950/20 px-3 py-1.5 text-xs font-bold text-ink-900 transition hover:bg-red-700 hover:text-white"
@@ -171,6 +214,10 @@ export default function Admin() {
         </div>
       </div>
 
+      <div className="mx-auto max-w-6xl px-4 pt-5">
+        <SyncBar />
+      </div>
+
       <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">
         {tab === 'products' && <ProductsTab />}
         {tab === 'cats' && <CatsTab />}
@@ -180,6 +227,184 @@ export default function Admin() {
         {tab === 'strings' && <StringsTab />}
         {tab === 'settings' && <SettingsTab key={data.settings.pin} />}
       </div>
+    </div>
+  )
+}
+
+/* ---------------- Publish bar ---------------- */
+
+function SyncBar() {
+  const { remote, user, dirty, status, message, lastPublished, publish, pull } = useSite()
+
+  if (!remote) {
+    return (
+      <div className="flex items-start gap-2 border border-amber-600/30 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-900">
+        <CloudOff size={15} className="mt-0.5 shrink-0" />
+        <p>
+          <b>وضع محلي:</b> التعديلات تُحفظ في هذا المتصفح فقط ولا يراها الزوار. لتفعيل النشر أضف{' '}
+          <code className="bg-white px-1" dir="ltr">
+            VITE_SUPABASE_URL
+          </code>{' '}
+          و{' '}
+          <code className="bg-white px-1" dir="ltr">
+            VITE_SUPABASE_ANON_KEY
+          </code>{' '}
+          ثم أعد النشر — الخطوات كاملة في <b>SYNC.md</b>.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 border border-ink-950/10 bg-white px-4 py-3 text-xs">
+      <span
+        className={`flex items-center gap-1.5 px-2 py-1 font-bold ${
+          dirty ? 'bg-amber-100 text-amber-900' : 'bg-green-100 text-green-900'
+        }`}
+      >
+        <CloudUpload size={13} /> {dirty ? 'تغييرات غير منشورة' : 'كل شيء منشور'}
+      </span>
+      <span className="text-ink-500">
+        {message || (lastPublished ? `آخر نشر: ${new Date(lastPublished).toLocaleString('ar-EG')}` : 'لم تُنشر نسخة بعد')}
+      </span>
+      <div className="ms-auto flex items-center gap-2">
+        {user && (
+          <span className="hidden text-ink-500 sm:inline" dir="ltr">
+            {user}
+          </span>
+        )}
+        <button
+          onClick={() => void pull()}
+          disabled={status === 'loading' || status === 'saving'}
+          className="flex items-center gap-1.5 border border-ink-950/20 px-3 py-1.5 font-bold transition hover:bg-ink-950 hover:text-ivory-50 disabled:opacity-40"
+        >
+          <RefreshCw size={13} className={status === 'loading' ? 'animate-spin' : ''} /> تحديث
+        </button>
+        <button
+          onClick={async () => {
+            if (!window.confirm('نشر التعديلات الآن؟ ستظهر فوراً لكل زوار الموقع.')) return
+            await publish()
+          }}
+          disabled={!dirty || status === 'saving'}
+          className="flex items-center gap-1.5 bg-ink-950 px-3 py-1.5 font-bold text-ivory-50 transition hover:bg-gold-600 disabled:opacity-40"
+        >
+          <CloudUpload size={13} /> {status === 'saving' ? 'جارٍ النشر...' : 'نشر الآن'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Publish bar ---------------- */
+
+const BIG_WARN = 50 * 1024 * 1024
+
+function confirmSize(size: number, action: string): boolean {
+  return window.confirm(
+    `${action} (${(size / 1048576).toFixed(1)} MB) حجم كبير.\n` +
+      'Supabase Free تمنح مساحة تخزين محدودة (حوالي 1 GB إجمالياً) — ملفات الفيديو الكبيرة تزيد استهلاك الحصة.\n' +
+      'رفعه على أي حال؟',
+  )
+}
+
+/* ---------------- Storage in the cloud ---------------- */
+
+function MediaCloudTab() {
+  const { data, remote } = useSite()
+  const [objects, setObjects] = useState<MediaObject[] | null>(null)
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const refresh = async () => {
+    setBusy(true)
+    setMessage('')
+    try {
+      setObjects(await listMediaObjects())
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل القراءة')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (!remote) return null
+
+  const inUse = (name: string) =>
+    data.products.some((p) => p.image?.includes(name)) ||
+    data.videos.some((v) => v.src.includes(name) || (v.poster?.includes(name) ?? false)) ||
+    data.settings.heroBg.image.includes(name) ||
+    data.settings.heroBg.video.includes(name)
+
+  const remove = async (name: string) => {
+    const used = inUse(name)
+    const ok = window.confirm(
+      `حذف «${name}» من التخزين؟\n${
+        used ? '⚠️ هذا الملف مرجّع من منتج أو فيديو — عدّل ذلك أولاً' : 'الحذف فوري: الصورة ستختفي للزوار'
+      }`,
+    )
+    if (!ok) return
+    setMessage('')
+    try {
+      await deleteMedia(name)
+      await refresh()
+      setMessage('تم الحذف')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '')
+    }
+  }
+
+  const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`
+  const total = objects ? objects.reduce((a, o) => a + o.size, 0) : 0
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-ink-500">
+          {objects === null ? 'جارٍ القراءة...' : `${objects.length} ملف · ${mb(total)}`}
+          {message && <span className="ms-2 text-red-700">{message}</span>}
+        </p>
+        <button
+          onClick={() => void refresh()}
+          disabled={busy}
+          className="flex items-center gap-1.5 border border-ink-950/20 px-3 py-1.5 text-xs font-bold transition hover:bg-ink-950 hover:text-ivory-50 disabled:opacity-40"
+        >
+          <RefreshCw size={13} className={busy ? 'animate-spin' : ''} /> تحديث
+        </button>
+      </div>
+      {objects && objects.length === 0 && <p className="mt-3 text-center text-xs text-ink-500">التخزين فارغ</p>}
+      {objects && objects.length > 0 && (
+        <ul className="mt-3 divide-y divide-ink-950/10 border border-ink-950/10 bg-white">
+          {objects.map((o) => {
+            const used = inUse(o.name)
+            return (
+              <li key={o.name} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                <span className="min-w-0 truncate font-mono text-ink-700" dir="ltr">
+                  {o.name}
+                </span>
+                <span className="shrink-0 font-bold text-ink-950">{mb(o.size)}</span>
+                <button
+                  onClick={() => void remove(o.name)}
+                  disabled={used}
+                  title={used ? 'يستحق الاستخدام من منتج أو فيديو' : 'حذف نهائي — سيزول للزوار'}
+                  className={`flex shrink-0 items-center gap-1 font-bold transition ${
+                    used ? 'cursor-not-allowed text-ink-400' : 'text-red-700 hover:underline'
+                  }`}
+                >
+                  <Trash2 size={13} /> {used ? 'قيد الاستخدام' : 'حذف'}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <p className="mt-2 text-[11px] leading-5 text-ink-500">
+        أقصى قائمة 1000 ملف. حذف ملف يزيله فوراً — حذف رابط لا يزيل المحتوى إلا بعد إعادة النشر.
+      </p>
     </div>
   )
 }
@@ -349,8 +574,11 @@ function ProductForm({ initial, onClose }: { initial: Product; onClose: () => vo
                       setUploading(true)
                       try {
                         const blob = await compressImage(f)
-                        const id = await saveMedia(blob)
+                        if (blob.size > BIG_WARN && !(await confirmSize(blob.size, 'صورة المنتج'))) return
+                        const id = await saveMediaSmart(blob)
                         set('image', id)
+                      } catch {
+                        window.alert('تعذر رفع الصورة — تحقق من الاتصال أو من مساحة التخزين')
                       } finally {
                         setUploading(false)
                         e.target.value = ''
@@ -633,7 +861,10 @@ function VideosTab() {
     }
     setUploading(true)
     try {
-      return await saveMedia(f)
+      return await saveMediaSmart(f)
+    } catch {
+      window.alert('تعذر رفع الفيديو — تحقق من الاتصال أو من مساحة التخزين')
+      return null
     } finally {
       setUploading(false)
     }
@@ -681,8 +912,13 @@ function VideosTab() {
                   onChange={async (e) => {
                     const f = e.target.files?.[0]
                     if (!f) return
-                    const blob = await compressImage(f, 540, 0.75)
-                    setDraft({ ...draft, poster: await saveMedia(blob) })
+                    try {
+                      const blob = await compressImage(f, 540, 0.75)
+                      if (blob.size > BIG_WARN && !(await confirmSize(blob.size, 'الصورة المصغرة'))) return
+                      setDraft({ ...draft, poster: await saveMediaSmart(blob) })
+                    } catch {
+                      window.alert('تعذر رفع الصورة المصغرة')
+                    }
                     e.target.value = ''
                   }}
                 />
@@ -911,7 +1147,7 @@ function StringsTab() {
 /* ---------------- Settings ---------------- */
 
 function SettingsTab() {
-  const { data, patchSettings, resetAll, replaceAll } = useSite()
+  const { data, patchSettings, resetAll, replaceAll, remote, user, lastPublished } = useSite()
   const s = data.settings
   const fileRef = useRef<HTMLInputElement>(null)
   const imgRef = useRef<HTMLInputElement>(null)
@@ -999,8 +1235,13 @@ function SettingsTab() {
                 onChange={async (e) => {
                   const f = e.target.files?.[0]
                   if (!f) return
-                  const blob = await compressImage(f, 1600, 0.85)
-                  patchSettings({ heroBg: { ...s.heroBg, image: await saveMedia(blob) } })
+                  try {
+                    const blob = await compressImage(f, 1600, 0.85)
+                    if (blob.size > BIG_WARN && !(await confirmSize(blob.size, 'صورة الخلفية'))) return
+                    patchSettings({ heroBg: { ...s.heroBg, image: await saveMediaSmart(blob) } })
+                  } catch {
+                    window.alert('تعذر رفع صورة الخلفية')
+                  }
                   e.target.value = ''
                 }}
               />
@@ -1044,6 +1285,52 @@ function SettingsTab() {
         <SRow label="منتجات لكل صفحة">
           <input type="number" min={4} max={48} value={s.perPage} onChange={(e) => patchSettings({ perPage: Math.min(48, Math.max(4, Number(e.target.value) || 12)) })} className={inp} />
         </SRow>
+      </Card>
+
+      <Card title="الخادم والمزامنة">
+        {remote ? (
+          <>
+            <p className="text-xs leading-6 text-ink-500">
+              متصل بـ Supabase — التعديلات تُنشر بزر «نشر الآن» أعلى الصفحة وتظهر فوراً لكل الزوار، والصور والفيديو
+              تُرفع إلى السحابة.
+            </p>
+            <SRow label="الحساب">
+              <span className="text-sm text-ink-900" dir="ltr">
+                {user ?? '—'}
+              </span>
+            </SRow>
+            <SRow label="آخر نشر">
+              <span className="text-sm text-ink-900">
+                {lastPublished ? new Date(lastPublished).toLocaleString('ar-EG') : 'لم يُنشر بعد'}
+              </span>
+            </SRow>
+            <SRow label="النشر التلقائي">
+              <label className="flex items-center gap-2 text-sm text-ink-900">
+                <input
+                  type="checkbox"
+                  checked={!!data.settings.autoPublish}
+                  onChange={(e) => patchSettings({ autoPublish: e.target.checked })}
+                  className="size-4 accent-[#8a6c2a]"
+                />
+                نشر تلقائي (بعد 3 ثوانٍ خلفي)
+              </label>
+            </SRow>
+          </>
+        ) : (
+          <p className="text-xs leading-6 text-ink-500">
+            وضع محلي: كل شيء يُحفظ في متصفحك فقط. لتفعيل النشر للزوار راجع ملف <b>SYNC.md</b> في المشروع.
+          </p>
+        )}
+      </Card>
+
+      <Card title="الوسائط في السحابة">
+        {remote ? (
+          <MediaCloudTab />
+        ) : (
+          <p className="text-xs leading-6 text-ink-500">
+            وضع محلي: الوسائط في هذا المتصفح فقط — عند التفعيل بما في السحابة تظهر هنا قائمة الملفات.
+          </p>
+        )}
       </Card>
 
       <Card title="الأمان والنسخ">

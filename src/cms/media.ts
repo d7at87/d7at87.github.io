@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getSession, remoteConfigured, uploadMedia } from './remote'
 
 /**
  * Media storage in IndexedDB (much larger than localStorage).
@@ -46,6 +47,22 @@ export async function getMedia(id: string): Promise<Blob | null> {
   } catch {
     return null
   }
+}
+
+/**
+ * Save media to the best available target:
+ *  - cloud bucket when the backend is configured and the admin is signed in
+ *  - IndexedDB otherwise (offline / local mode); publish migrates these later.
+ */
+export async function saveMediaSmart(blob: Blob): Promise<string> {
+  if (remoteConfigured && getSession()) {
+    try {
+      return await uploadMedia(blob)
+    } catch {
+      /* network or permission problem — keep the file on the device */
+    }
+  }
+  return saveMedia(blob)
 }
 
 const urlCache = new Map<string, string>()

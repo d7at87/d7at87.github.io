@@ -23,6 +23,5 @@ Thumbs.db
 
 # local-only handoff (contains secrets)
 HANDOFF.md
-README.md
 SECRETS.local.md
 

@@ -121,6 +121,8 @@ export interface Settings {
   perPage: number
   pin: string
   promo?: { code: string; pct: number }
+  /** عند التفعيل ينشر التعديلات تلقائياً (بعد 3 ثوانٍ خلفي) — لخوارزمية النشر. */
+  autoPublish?: boolean
 }
 
 export interface SiteData {
