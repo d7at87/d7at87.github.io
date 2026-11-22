@@ -37,8 +37,19 @@ function Shell() {
 
   useEffect(() => {
     const onHash = () => {
-      setRoute(window.location.hash)
-      window.scrollTo({ top: 0 })
+      const hash = window.location.hash
+      setRoute(hash)
+      // Admin is a separate view; every other hash is either a section anchor
+      // or empty — only the latter should jump back to the top.
+      if (hash.startsWith('#/') || !hash) {
+        window.scrollTo({ top: 0 })
+        return
+      }
+      requestAnimationFrame(() => {
+        const target = document.getElementById(hash.slice(1))
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        else window.scrollTo({ top: 0 })
+      })
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)

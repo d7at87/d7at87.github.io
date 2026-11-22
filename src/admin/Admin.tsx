@@ -36,8 +36,9 @@ function LPair({ label, value, onChange }: { label: string; value: LText; onChan
   return (
     <div className="grid items-start gap-2 md:grid-cols-[150px_1fr_1fr]">
       <span className="pt-2 text-xs font-bold text-ink-700">{label}</span>
-      <input value={value.ar} onChange={(e) => onChange({ ...value, ar: e.target.value })} placeholder="العربية" className={inp} />
+      <input aria-label={`${label} (العربية)`} value={value.ar} onChange={(e) => onChange({ ...value, ar: e.target.value })} placeholder="العربية" className={inp} />
       <input
+        aria-label={`${label} (עברית)`}
         value={value.he}
         onChange={(e) => onChange({ ...value, he: e.target.value })}
         placeholder="עברית"
@@ -128,6 +129,7 @@ export default function Admin() {
           </p>
           {remote && (
             <input
+              aria-label="البريد الإلكتروني"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -139,6 +141,7 @@ export default function Admin() {
             />
           )}
           <input
+            aria-label={remote ? 'كلمة المرور' : 'رمز الدخول'}
             type="password"
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
@@ -298,6 +301,8 @@ function SyncBar() {
 /* ---------------- Publish bar ---------------- */
 
 const BIG_WARN = 50 * 1024 * 1024
+/** Supabase Free gives ~1 GB total storage; warn well before uploads start failing. */
+const STORAGE_QUOTA = 1024 * 1024 * 1024
 
 function confirmSize(size: number, action: string): boolean {
   return window.confirm(
@@ -376,6 +381,21 @@ function MediaCloudTab() {
           <RefreshCw size={13} className={busy ? 'animate-spin' : ''} /> تحديث
         </button>
       </div>
+      {objects && (
+        <div className="mt-3">
+          <div className="h-1.5 w-full bg-ink-950/10">
+            <div
+              className={`h-full transition-all ${total > STORAGE_QUOTA * 0.8 ? 'bg-red-700' : 'bg-gold-600'}`}
+              style={{ width: `${Math.min(100, (total / STORAGE_QUOTA) * 100)}%` }}
+            />
+          </div>
+          <p className={`mt-1 text-[11px] ${total > STORAGE_QUOTA * 0.8 ? 'font-bold text-red-700' : 'text-ink-500'}`}>
+            {total > STORAGE_QUOTA * 0.8
+              ? `اقتربت من حد التخزين (${mb(total)} من ~1 GB) — احذف ملفات قديمة أو ارتقِ بخطتك قبل نفاد الحصة`
+              : `من حصة ~1 GB: ${mb(total)} مستخدمة (${Math.round((total / STORAGE_QUOTA) * 100)}٪)`}
+          </p>
+        </div>
+      )}
       {objects && objects.length === 0 && <p className="mt-3 text-center text-xs text-ink-500">التخزين فارغ</p>}
       {objects && objects.length > 0 && (
         <ul className="mt-3 divide-y divide-ink-950/10 border border-ink-950/10 bg-white">
@@ -390,7 +410,7 @@ function MediaCloudTab() {
                 <button
                   onClick={() => void remove(o.name)}
                   disabled={used}
-                  title={used ? 'يستحق الاستخدام من منتج أو فيديو' : 'حذف نهائي — سيزول للزوار'}
+                  title={used ? 'قيد الاستخدام من منتج أو فيديو' : 'حذف نهائي — سيزول للزوار'}
                   className={`flex shrink-0 items-center gap-1 font-bold transition ${
                     used ? 'cursor-not-allowed text-ink-400' : 'text-red-700 hover:underline'
                   }`}
@@ -441,7 +461,7 @@ function ProductsTab() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث في المنتجات..." className={`${inp} max-w-xs`} />
+        <input aria-label="بحث في المنتجات" value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث في المنتجات..." className={`${inp} max-w-xs`} />
         <span className="text-xs text-ink-500">
           {list.length.toLocaleString('ar-EG')} / {data.products.length.toLocaleString('ar-EG')}
         </span>

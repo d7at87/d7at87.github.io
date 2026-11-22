@@ -1,5 +1,5 @@
 /* Ashour service worker — app-shell + asset cache */
-const CACHE = 'ashour-v1'
+const CACHE = 'ashour-v2'
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg']
 
 self.addEventListener('install', (e) => {
