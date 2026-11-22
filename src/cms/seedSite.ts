@@ -238,4 +238,5 @@ export const SEED_SETTINGS: Settings = {
   fontB: 1,
   perPage: 12,
   pin: '1234',
+  autoPublish: true,
 }
