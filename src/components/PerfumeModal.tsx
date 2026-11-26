@@ -51,7 +51,7 @@ export default function PerfumeModal({ perfume, onClose, onAdd }: Props) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink-950/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-ink-950/60 p-3 backdrop-blur-sm sm:p-4"
         >
           <motion.div
             initial={{ opacity: 0, y: 40, scale: 0.97 }}
@@ -59,7 +59,7 @@ export default function PerfumeModal({ perfume, onClose, onAdd }: Props) {
             exit={{ opacity: 0, y: 20, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 220, damping: 24 }}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-4xl overflow-hidden border border-ink-950/10 bg-ivory-50 shadow-2xl"
+            className="relative my-auto w-full max-w-4xl overflow-hidden border border-ink-950/10 bg-ivory-50 shadow-2xl"
           >
             <div
               className="pointer-events-none absolute -top-32 -start-32 size-96 rounded-full opacity-20 blur-[120px]"
@@ -74,13 +74,16 @@ export default function PerfumeModal({ perfume, onClose, onAdd }: Props) {
             </button>
 
             <div className="grid md:grid-cols-2">
-              <div className="relative flex items-center justify-center bg-gradient-to-b from-ivory-100 to-ivory-50 p-10">
+              <div className="relative flex items-center justify-center bg-gradient-to-b from-ivory-100 to-ivory-50 p-6 sm:p-10">
                 <motion.div
                   animate={{ y: [0, -10, 0] }}
                   transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                  className="w-52"
+                  className="flex w-full max-w-[13rem] items-center justify-center"
                 >
-                  <ProductImage p={perfume} className="w-full drop-shadow-2xl" />
+                  <ProductImage
+                    p={perfume}
+                    className="max-h-[38vh] w-auto max-w-full object-contain drop-shadow-2xl md:max-h-[30rem]"
+                  />
                 </motion.div>
               </div>
 
