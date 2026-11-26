@@ -37,6 +37,8 @@ export interface Category {
   name: LText
   desc: LText
   color: string
+  /** صورة اختيارية تظهر في بلاط «مجموعات مختارة» بدل صورة المنتج */
+  image?: string
 }
 
 export interface VideoItem {
@@ -120,6 +122,12 @@ export interface Settings {
   fontB: number
   perPage: number
   pin: string
+  /**شعارات الماركات (مفتاحها اسم الماركة) — تظهر في شريط الماركات بدل الحرف */
+  brandLogos?: Record<string, string>
+  /**عرض الأقسام: rail = جانبي، grid = شبكة 4 أعمدة */
+  layouts?: Record<string, 'rail' | 'grid'>
+  /**إظهار/إخفاء قسم من أقسام المتجر */
+  visibility?: Record<string, boolean>
   promo?: { code: string; pct: number }
   /** عند التفعيل ينشر التعديلات تلقائياً (بعد 3 ثوانٍ خلفي) — لخوارزمية النشر. */
   autoPublish?: boolean

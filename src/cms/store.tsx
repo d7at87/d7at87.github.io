@@ -3,6 +3,7 @@ import type { Category, Content, Lang, LText, Product, Settings, SiteData, Video
 import { normalizeSiteData, seedData } from './normalize'
 import { migrateMediaToRemote } from './migrate'
 import { fetchSite, getSession, pushSite, remoteConfigured, signInRemote, signOutRemote } from './remote'
+import { lb } from './labels'
 
 const LS_DATA = 'ashour-cms-v1'
 const LS_LANG = 'ashour-lang'
@@ -197,7 +198,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const setLang = (l: Lang) => setLangState(l)
 
   const value = useMemo<SiteCtx>(() => {
-    const t = (key: string) => data.ui[key]?.[lang] ?? data.ui[key]?.ar ?? key
+    const t = (key: string) => data.ui[key]?.[lang] ?? data.ui[key]?.ar ?? lb(key, lang)
     const L = (v: LText) => v?.[lang] ?? v?.ar ?? ''
     const formatPrice = (n: number) =>
       `${n.toLocaleString(lang === 'ar' ? 'ar-EG' : 'he-IL')} ${data.settings.currency[lang] ?? data.settings.currency.ar}`

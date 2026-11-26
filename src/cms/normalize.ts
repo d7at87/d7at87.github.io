@@ -73,6 +73,7 @@ const CATEGORY_BASE: Category = {
   name: { ar: '', he: '' },
   desc: { ar: '', he: '' },
   color: '#d4a24c',
+  image: undefined,
 }
 
 function normLText(v: LText): LText {
@@ -109,6 +110,7 @@ function normCategory(raw: unknown): Category | null {
   c.name = normLText(c.name)
   c.desc = normLText(c.desc)
   c.color = str(c.color, '#d4a24c')
+  c.image = typeof c.image === 'string' && c.image.trim() ? c.image : undefined
   return c
 }
 

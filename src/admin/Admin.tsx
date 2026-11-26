@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Upload,
   Clapperboard,
+  LayoutGrid,
   ArrowUp,
   ArrowDown,
   Copy,
@@ -67,7 +68,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
-type Tab = 'products' | 'cats' | 'brands' | 'videos' | 'content' | 'strings' | 'settings'
+type Tab = 'products' | 'cats' | 'brands' | 'videos' | 'content' | 'strings' | 'layout' | 'settings'
 
 const TABS: { id: Tab; label: string; icon: typeof Package }[] = [
   { id: 'products', label: 'المنتجات', icon: Package },
@@ -76,6 +77,7 @@ const TABS: { id: Tab; label: string; icon: typeof Package }[] = [
   { id: 'videos', label: 'الفيديوهات', icon: Clapperboard },
   { id: 'content', label: 'المحتوى والنصوص', icon: Type },
   { id: 'strings', label: 'نصوص الواجهة', icon: Languages },
+  { id: 'layout', label: 'عرض الأقسام', icon: LayoutGrid },
   { id: 'settings', label: 'الإعدادات', icon: SettingsIcon },
 ]
 
@@ -228,6 +230,7 @@ export default function Admin() {
         {tab === 'videos' && <VideosTab />}
         {tab === 'content' && <ContentTab />}
         {tab === 'strings' && <StringsTab />}
+        {tab === 'layout' && <LayoutTab />}
         {tab === 'settings' && <SettingsTab key={data.settings.pin} />}
       </div>
     </div>
@@ -743,10 +746,74 @@ function ProductForm({ initial, onClose }: { initial: Product; onClose: () => vo
 
 /* ---------------- Categories ---------------- */
 
+function ImageField({
+  label,
+  hint,
+  image,
+  onChange,
+}: {
+  label: string
+  hint: string
+  image?: string
+  onChange: (image?: string) => void
+}) {
+  const url = useMediaURL(image)
+  const [uploading, setUploading] = useState(false)
+
+  return (
+    <SRow label={label}>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden bg-ivory-100 ring-1 ring-ink-950/10">
+          {url ? (
+            <img src={url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-[10px] text-ink-500">بدون صورة</span>
+          )}
+        </div>
+        <label className="flex cursor-pointer items-center gap-1.5 bg-ink-950 px-4 py-2 text-xs font-bold text-ivory-50 transition hover:bg-gold-600">
+          <ImagePlus size={14} /> {uploading ? 'جارٍ الرفع...' : 'رفع صورة'}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0]
+              if (!f) return
+              setUploading(true)
+              try {
+                const blob = await compressImage(f)
+                if (blob.size > BIG_WARN && !confirmSize(blob.size, label)) return
+                onChange(await saveMediaSmart(blob))
+              } catch {
+                window.alert('تعذر رفع الصورة — تحقق من الاتصال أو مساحة التخزين')
+              } finally {
+                setUploading(false)
+                e.target.value = ''
+              }
+            }}
+          />
+        </label>
+        {image && (
+          <button
+            onClick={() => onChange(undefined)}
+            className="border border-red-700/30 px-3 py-2 text-xs font-bold text-red-700 transition hover:bg-red-700 hover:text-white"
+          >
+            إزالة
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-[11px] text-ink-500">{hint}</p>
+    </SRow>
+  )
+}
+
+const CATEGORY_IMAGE_HINT = 'تظهر صورة التصنيف في بلاط «مجموعات مختارة» بعد الريلز.'
+const BRAND_LOGO_HINT = 'يظهر شعار الماركة في شريط «تسوّق حسب الماركة» بدل الحرف.'
+
 function CatsTab() {
   const { data, saveCategory, deleteCategory } = useSite()
   const [showAdd, setShowAdd] = useState(false)
-  const [draft, setDraft] = useState({ name: { ar: '', he: '' }, desc: { ar: '', he: '' }, color: '#d4a24c' })
+  const [draft, setDraft] = useState({ name: { ar: '', he: '' }, desc: { ar: '', he: '' }, color: '#d4a24c', image: undefined as string | undefined })
 
   const usedCount = (id: string) => data.products.filter((p) => p.categoryId === id).length
 
@@ -765,11 +832,12 @@ function CatsTab() {
           <SRow label="اللون">
             <input type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} className="h-9 w-16 cursor-pointer" />
           </SRow>
+          <ImageField label="صورة التصنيف" hint={CATEGORY_IMAGE_HINT} image={draft.image} onChange={(image) => setDraft({ ...draft, image })} />
           <button
             disabled={!draft.name.ar.trim()}
             onClick={() => {
               saveCategory({ id: `c-${Date.now()}`, ...draft })
-              setDraft({ name: { ar: '', he: '' }, desc: { ar: '', he: '' }, color: '#d4a24c' })
+              setDraft({ name: { ar: '', he: '' }, desc: { ar: '', he: '' }, color: '#d4a24c', image: undefined })
               setShowAdd(false)
             }}
             className="bg-ink-950 px-6 py-2.5 text-xs font-bold text-ivory-50 transition hover:bg-gold-600 disabled:opacity-40"
@@ -802,6 +870,7 @@ function CatsTab() {
           <SRow label="اللون">
             <input type="color" value={c.color} onChange={(e) => saveCategory({ ...c, color: e.target.value })} className="h-9 w-16 cursor-pointer" />
           </SRow>
+          <ImageField label="صورة التصنيف" hint={CATEGORY_IMAGE_HINT} image={c.image} onChange={(image) => saveCategory({ ...c, image })} />
         </div>
       ))}
     </div>
@@ -811,8 +880,16 @@ function CatsTab() {
 /* ---------------- Brands ---------------- */
 
 function BrandsTab() {
-  const { data, setBrands } = useSite()
+  const { data, setBrands, saveProduct, patchSettings } = useSite()
   const [name, setName] = useState('')
+  const logos = data.settings.brandLogos ?? {}
+
+  const setLogo = (brand: string, logo?: string) => {
+    const next = { ...logos }
+    if (logo) next[brand] = logo
+    else delete next[brand]
+    patchSettings({ brandLogos: next })
+  }
 
   const used = (b: string) => data.products.filter((p) => p.brand === b).length
 
@@ -833,23 +910,52 @@ function BrandsTab() {
       </div>
       <ul className="mt-4 divide-y divide-ink-950/10">
         {data.brands.map((b) => (
-          <li key={b} className="flex items-center justify-between py-3">
-            <div>
-              <p className="font-bold text-ink-950">{b}</p>
-              <p className="text-xs text-ink-500">{used(b).toLocaleString('ar-EG')} منتج</p>
+          <li key={b} className="space-y-3 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-bold text-ink-950">{b}</p>
+                <p className="text-xs text-ink-500">{used(b).toLocaleString('ar-EG')} منتج</p>
+              </div>
+              <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const next = window.prompt('اسم الدار الجديد', b)?.trim()
+                  if (!next || next === b) return
+                  if (data.brands.includes(next)) {
+                    window.alert('هذه الدار موجودة بالفعل')
+                    return
+                  }
+                  setBrands(data.brands.map((x) => (x === b ? next : x)))
+                  data.products.filter((p) => p.brand === b).forEach((p) => saveProduct({ ...p, brand: next }))
+                  if (logos[b]) {
+                    const moved = { ...logos, [next]: logos[b] }
+                    delete moved[b]
+                    patchSettings({ brandLogos: moved })
+                  }
+                }}
+                aria-label={`تعديل ${b}`}
+                className="grid size-8 place-items-center text-ink-700 ring-1 ring-ink-950/15 transition hover:bg-ink-950 hover:text-ivory-50"
+              >
+                <Pencil size={14} />
+              </button>
+                <button
+                  onClick={() => {
+                    if (used(b) > 0) {
+                      window.alert(`لا يمكن الحذف: يوجد ${used(b)} منتج بهذه الدار.`)
+                      return
+                    }
+                    if (window.confirm(`حذف «${b}»؟`)) {
+                      setBrands(data.brands.filter((x) => x !== b))
+                      setLogo(b, undefined)
+                    }
+                  }}
+                  className="grid size-8 place-items-center text-red-700 ring-1 ring-red-700/20 transition hover:bg-red-700 hover:text-white"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                if (used(b) > 0) {
-                  window.alert(`لا يمكن الحذف: يوجد ${used(b)} منتج بهذه الدار.`)
-                  return
-                }
-                if (window.confirm(`حذف «${b}»؟`)) setBrands(data.brands.filter((x) => x !== b))
-              }}
-              className="grid size-8 place-items-center text-red-700 ring-1 ring-red-700/20 transition hover:bg-red-700 hover:text-white"
-            >
-              <Trash2 size={14} />
-            </button>
+            <ImageField label={`شعار ${b}`} hint={BRAND_LOGO_HINT} image={logos[b]} onChange={(logo) => setLogo(b, logo)} />
           </li>
         ))}
       </ul>
@@ -1019,82 +1125,22 @@ function ContentTab() {
         <LPair label="زر 2" value={c.hero.cta2} onChange={(v) => patch((x) => (x.hero.cta2 = v))} />
       </Card>
 
-      <Card title="بلاطات العائلات + الأكثر مبيعاً + الفيديوهات + المجموعة">
-        <LPair label="عائلات: علوي" value={c.families.eyebrow} onChange={(v) => patch((x) => (x.families.eyebrow = v))} />
-        <LPair label="عائلات: عنوان" value={c.families.title1} onChange={(v) => patch((x) => (x.families.title1 = v))} />
-        <LPair label="عائلات: عنوان مميز" value={c.families.title2} onChange={(v) => patch((x) => (x.families.title2 = v))} />
-        <LPair label="الأكثر: علوي" value={c.best.eyebrow} onChange={(v) => patch((x) => (x.best.eyebrow = v))} />
-        <LPair label="الأكثر: عنوان" value={c.best.title1} onChange={(v) => patch((x) => (x.best.title1 = v))} />
-        <LPair label="الأكثر: مميز" value={c.best.title2} onChange={(v) => patch((x) => (x.best.title2 = v))} />
-        <LPair label="الأكثر: وصف" value={c.best.sub} onChange={(v) => patch((x) => (x.best.sub = v))} />
-        <LPair label="الفيديو: علوي" value={c.reels.eyebrow} onChange={(v) => patch((x) => (x.reels.eyebrow = v))} />
-        <LPair label="الفيديو: عنوان" value={c.reels.title1} onChange={(v) => patch((x) => (x.reels.title1 = v))} />
-        <LPair label="الفيديو: مميز" value={c.reels.title2} onChange={(v) => patch((x) => (x.reels.title2 = v))} />
+      <Card title="الريلز + صفحة الكتالوج">
+        <LPair label="الريلز: علوي" value={c.reels.eyebrow} onChange={(v) => patch((x) => (x.reels.eyebrow = v))} />
+        <LPair label="الريلز: عنوان" value={c.reels.title1} onChange={(v) => patch((x) => (x.reels.title1 = v))} />
+        <LPair label="الريلز: مميز" value={c.reels.title2} onChange={(v) => patch((x) => (x.reels.title2 = v))} />
         <LPair label="المجموعة: علوي" value={c.collection.eyebrow} onChange={(v) => patch((x) => (x.collection.eyebrow = v))} />
         <LPair label="المجموعة: عنوان" value={c.collection.title1} onChange={(v) => patch((x) => (x.collection.title1 = v))} />
         <LPair label="المجموعة: مميز" value={c.collection.title2} onChange={(v) => patch((x) => (x.collection.title2 = v))} />
         <LPair label="المجموعة: وصف" value={c.collection.sub} onChange={(v) => patch((x) => (x.collection.sub = v))} />
       </Card>
 
-      <Card title="العروض (3 بطاقات)">
-        <LPair label="علوي" value={c.offers.eyebrow} onChange={(v) => patch((x) => (x.offers.eyebrow = v))} />
-        <LPair label="عنوان" value={c.offers.title1} onChange={(v) => patch((x) => (x.offers.title1 = v))} />
-        <LPair label="مميز" value={c.offers.title2} onChange={(v) => patch((x) => (x.offers.title2 = v))} />
-        {c.offers.items.map((it, i) => (
-          <div key={i} className="space-y-2 border border-ink-950/10 bg-ivory-50 p-3">
-            <p className="text-xs font-black text-gold-600">العرض {i + 1}</p>
-            <LPair label="العنوان" value={it} onChange={(v) => patch((x) => (x.offers.items[i] = { ...x.offers.items[i], ...v }))} />
-            <LPair label="الوصف" value={it.desc} onChange={(v) => patch((x) => (x.offers.items[i].desc = v))} />
-            <LPair label="الزر" value={it.cta} onChange={(v) => patch((x) => (x.offers.items[i].cta = v))} />
-          </div>
-        ))}
-      </Card>
-
-      <Card title="الدار + المراحل + الأرقام">
-        <LPair label="علوي" value={c.maison.eyebrow} onChange={(v) => patch((x) => (x.maison.eyebrow = v))} />
-        <LPair label="عنوان" value={c.maison.title1} onChange={(v) => patch((x) => (x.maison.title1 = v))} />
-        <LPair label="مميز" value={c.maison.title2} onChange={(v) => patch((x) => (x.maison.title2 = v))} />
-        <LPair label="الوصف" value={c.maison.sub} onChange={(v) => patch((x) => (x.maison.sub = v))} />
-        <LPair label="عنوان المراحل" value={c.maison.craftTitle} onChange={(v) => patch((x) => (x.maison.craftTitle = v))} />
-        {c.maison.steps.map((st, i) => (
-          <div key={i} className="space-y-2 border border-ink-950/10 bg-ivory-50 p-3">
-            <p className="text-xs font-black text-gold-600">المرحلة {i + 1}</p>
-            <LPair label="العنوان" value={st} onChange={(v) => patch((x) => (x.maison.steps[i] = { ...x.maison.steps[i], ...v }))} />
-            <LPair label="الوصف" value={st.desc} onChange={(v) => patch((x) => (x.maison.steps[i].desc = v))} />
-          </div>
-        ))}
-        {c.maison.numbers.map((n, i) => (
-          <div key={i} className="space-y-2 border border-ink-950/10 bg-ivory-50 p-3">
-            <p className="text-xs font-black text-gold-600">الرقم {i + 1}</p>
-            <LPair label="القيمة" value={n.value} onChange={(v) => patch((x) => (x.maison.numbers[i].value = v))} />
-            <LPair label="التسمية" value={n.label} onChange={(v) => patch((x) => (x.maison.numbers[i].label = v))} />
-          </div>
-        ))}
-      </Card>
-
-      <Card title="الخدمات (3) + الوعود (4) + الإحصائيات (3)">
-        {c.services.items.map((sv, i) => (
-          <div key={i} className="space-y-2 border border-ink-950/10 bg-ivory-50 p-3">
-            <p className="text-xs font-black text-gold-600">الخدمة {i + 1}</p>
-            <LPair label="العنوان" value={sv} onChange={(v) => patch((x) => (x.services.items[i] = { ...x.services.items[i], ...v }))} />
-            <LPair label="الوصف" value={sv.desc} onChange={(v) => patch((x) => (x.services.items[i].desc = v))} />
-            <LPair label="الزر" value={sv.cta} onChange={(v) => patch((x) => (x.services.items[i].cta = v))} />
-          </div>
-        ))}
-        {c.promises.items.map((pr, i) => (
-          <div key={i} className="space-y-2 border border-ink-950/10 bg-ivory-50 p-3">
-            <p className="text-xs font-black text-gold-600">الوعد {i + 1}</p>
-            <LPair label="العنوان" value={pr.title} onChange={(v) => patch((x) => (x.promises.items[i].title = v))} />
-            <LPair label="الوصف" value={pr.desc} onChange={(v) => patch((x) => (x.promises.items[i].desc = v))} />
-          </div>
-        ))}
-        {c.stats.items.map((st, i) => (
-          <div key={i} className="space-y-2 border border-ink-950/10 bg-ivory-50 p-3">
-            <p className="text-xs font-black text-gold-600">إحصائية {i + 1}</p>
-            <LPair label="العنوان" value={st.title} onChange={(v) => patch((x) => (x.stats.items[i].title = v))} />
-            <LPair label="الوصف" value={st.desc} onChange={(v) => patch((x) => (x.stats.items[i].desc = v))} />
-          </div>
-        ))}
+      <Card title="ملاحظة عن التصميم الجديد">
+        <p className="text-xs leading-6 text-ink-500">
+          الأقسام القديمة (عائلات العطور، الدار، الخدمات، العروض) لم تعد تظهر بعد الريلز — بياناتها ما زالت محفوظة في
+          ملف النسخ الاحتياطي ولا تؤثر على المتجر. أقسام المتجر الجديدة تقرأ منتجاتك وتصنيفاتك ودورك مباشرة من هنا،
+          أما عناوينها فتُعدَّل من تبويب «نصوص الواجهة».
+        </p>
       </Card>
 
       <Card title="الفوتر">
@@ -1106,9 +1152,92 @@ function ContentTab() {
   )
 }
 
+/* ---------------- Storefront sections ---------------- */
+
+const STORE_SECTIONS: { key: string; label: string; mode: 'rail' | 'grid' }[] = [
+  { key: 'brands', label: 'شريط الماركات', mode: 'rail' },
+  { key: 'featured', label: 'مجموعات مختارة', mode: 'rail' },
+  { key: 'price', label: 'تسوّق حسب السعر', mode: 'rail' },
+  { key: 'blackFriday', label: 'منتجات الجمعة السوداء', mode: 'grid' },
+  { key: 'onSale', label: 'العروض', mode: 'grid' },
+  { key: 'testers', label: 'تسترات', mode: 'grid' },
+  { key: 'new', label: 'وصل حديثاً', mode: 'grid' },
+  { key: 'best', label: 'الأكثر مبيعاً', mode: 'grid' },
+  { key: 'gifts', label: 'مجموعات الهدايا', mode: 'grid' },
+  { key: 'arabic', label: 'العطور العربية', mode: 'grid' },
+  { key: 'niche', label: 'عطور النيش', mode: 'grid' },
+]
+
+function LayoutTab() {
+  const { data, patchSettings } = useSite()
+  const s = data.settings
+  const layouts = s.layouts ?? {}
+  const visibility = s.visibility ?? {}
+
+  return (
+    <div className="space-y-4">
+      <div className="border border-ink-950/10 bg-white p-5">
+        <p className="mb-1 text-sm font-bold text-ink-950">عرض أقسام المتجر بعد الريلز</p>
+        <p className="text-xs leading-6 text-ink-500">
+          اختر لكل قسم طريقة العرض: <b>جانبي</b> (بجانب بعض مع تمرير، مثل تسوّق حسب السعر) أو <b>شبكة ٤ أعمدة</b> (فوق بعض، مثل وصل حديثاً).
+          يمكنك أيضاً إخفاء أي قسم دون حذف بياناته. التغيير يظهر فوراً في المتجر، وبعد النشر يظهر للزوار.
+        </p>
+      </div>
+      <div className="border border-ink-950/10 bg-white p-5">
+        {STORE_SECTIONS.map((sec) => (
+          <div key={sec.key} className="grid items-center gap-3 border-b border-ink-950/10 py-4 last:border-0 md:grid-cols-[1fr_140px_180px]">
+            <p className="text-sm font-bold text-ink-950">{sec.label}</p>
+            <label className="flex items-center gap-2 text-xs font-bold text-ink-700">
+              <input
+                type="checkbox"
+                checked={visibility[sec.key] !== false}
+                onChange={(e) => patchSettings({ visibility: { ...visibility, [sec.key]: e.target.checked } })}
+                className="size-4 accent-[#8b6914]"
+              />
+              إظهار القسم
+            </label>
+            <select
+              value={layouts[sec.key] ?? sec.mode}
+              onChange={(e) => patchSettings({ layouts: { ...layouts, [sec.key]: e.target.value as 'rail' | 'grid' } })}
+              className={inp}
+            >
+              <option value="rail">عرض جانبي (تمرير)</option>
+              <option value="grid">شبكة ٤ أعمدة</option>
+            </select>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /* ---------------- UI strings ---------------- */
 
 const UI_LABELS: Record<string, string> = {
+  /* تسميات متجر رامّة بعد الريلز */
+  search: 'زر البحث (الشريط العلوي)',
+  blackFriday: 'الجمعة السوداء (عنوان البانر)',
+  blackFridayLive: 'نص: العرض مباشرة الآن',
+  exploreBlackFriday: 'زر: تصفّح العرض',
+  brandSub: 'تسوّق حسب الماركة (وصف)',
+  featuredSub: 'مجموعات مختارة (وصف)',
+  shopByBrand: 'تسوّق حسب الماركة',
+  shopByPrice: 'تسوّق حسب السعر',
+  allBrands: 'زر: كل الماركات',
+  viewAll: 'زر: عرض الكل',
+  onSale: 'عنوان: العروض',
+  newArrivals: 'عنوان: وصل حديثاً',
+  bestSellers: 'عنوان: الأكثر مبيعاً',
+  featured: 'عنوان: مجموعات مختارة',
+  testers: 'عنوان: تسترات',
+  giftSets: 'عنوان: مجموعات الهدايا',
+  arabicPerfumes: 'عنوان: العطور العربية',
+  nichePerfumes: 'عنوان: عطور النيش',
+  under100: 'سعر: أقل من ١٠٠',
+  range100150: 'سعر: ١٠٠–١٥٠',
+  range150250: 'سعر: ١٥٠–٢٥٠',
+  range250400: 'سعر: ٢٥٠–٤٠٠',
+  over400: 'سعر: ٤٠٠ فأكثر',
   home: 'الرئيسية (قائمة)',
   collection: 'المجموعة (قائمة)',
   maison: 'الدار (قائمة)',
@@ -1154,7 +1283,10 @@ function StringsTab() {
   const { data, setUI } = useSite()
   return (
     <div className="border border-ink-950/10 bg-white p-5">
-      <p className="mb-4 text-xs leading-6 text-ink-500">كل كلمة ثابتة في الواجهة (أزرار، تسميات، شارات) بالعربية والعبرية.</p>
+      <p className="mb-4 text-xs leading-6 text-ink-500">
+        كل كلمة ثابتة في الواجهة (أزرار، تسميات، شارات) بالعربية والعبرية — بما فيها عناوين أقسام المتجر بعد الريلز
+        (الجمعة السوداء، الماركات، المجموعات، الأسعار، العروض…). التعديل يظهر مباشرة في المتجر وبعد النشر للزوار.
+      </p>
       <div className="space-y-3">
         {Object.entries(data.ui).map(([key, v]) => (
           <LPair key={key} label={UI_LABELS[key] ?? key} value={v} onChange={(nv) => setUI({ ...data.ui, [key]: nv })} />

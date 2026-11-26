@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Download, Menu, ShoppingBag, X } from 'lucide-react'
+import { Download, Menu, Search, ShoppingBag, X } from 'lucide-react'
 import { useSite } from '../cms/store'
 import { isIOSDevice, usePWAInstall } from '../pwa'
 
@@ -89,6 +89,22 @@ export default function Navbar({ cartCount, onCartOpen }: Props) {
           </ul>
 
           <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('ashour-focus-search', '1')
+                } catch {
+                  /* ignore */
+                }
+                window.location.hash = '#/collections'
+              }}
+              aria-label={t('search')}
+              title={t('search')}
+              className={`grid size-10 place-items-center rounded-full ring-1 transition ${iconBtn}`}
+            >
+              <Search size={18} />
+            </button>
+
             <button
               onClick={() => setLang(lang === 'ar' ? 'he' : 'ar')}
               aria-label="language"
