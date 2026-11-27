@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   Download,
   Eye,
@@ -24,11 +24,15 @@ import {
   CloudOff,
   RefreshCw,
   Wand2,
+  Images,
+  Eraser,
+  X,
 } from 'lucide-react'
 import type { Category, Content, LText, Product } from '../cms/types'
 import { useSite } from '../cms/store'
 import { compressImage, saveMediaSmart, useMediaURL } from '../cms/media'
 import { removeImageBackground, type BgProgress } from '../cms/bgRemove'
+import { downloadBlob, encodeImage, trimTransparent, type FrameAspect } from '../cms/imageTools'
 import { deleteMedia, listMediaObjects, type MediaObject } from '../cms/remote'
 import BottleSVG from '../components/BottleSVG'
 
@@ -70,12 +74,13 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
-type Tab = 'products' | 'cats' | 'brands' | 'videos' | 'content' | 'strings' | 'layout' | 'settings'
+type Tab = 'products' | 'cats' | 'brands' | 'studio' | 'videos' | 'content' | 'strings' | 'layout' | 'settings'
 
 const TABS: { id: Tab; label: string; icon: typeof Package }[] = [
   { id: 'products', label: 'المنتجات', icon: Package },
   { id: 'cats', label: 'التصنيفات', icon: Layers },
   { id: 'brands', label: 'الدور', icon: Store },
+  { id: 'studio', label: 'استوديو الصور', icon: Images },
   { id: 'videos', label: 'الفيديوهات', icon: Clapperboard },
   { id: 'content', label: 'المحتوى والنصوص', icon: Type },
   { id: 'strings', label: 'نصوص الواجهة', icon: Languages },
@@ -229,6 +234,7 @@ export default function Admin() {
         {tab === 'products' && <ProductsTab />}
         {tab === 'cats' && <CatsTab />}
         {tab === 'brands' && <BrandsTab />}
+        {tab === 'studio' && <StudioTab />}
         {tab === 'videos' && <VideosTab />}
         {tab === 'content' && <ContentTab />}
         {tab === 'strings' && <StringsTab />}
@@ -749,6 +755,13 @@ function ProductForm({ initial, onClose }: { initial: Product; onClose: () => vo
 
 /* ---------------- Categories ---------------- */
 
+function askBgModelConsent(): boolean {
+  if (window.localStorage.getItem('ashour-bg-model')) return true
+  return window.confirm(
+    'إزالة الخلفية تعمل بالذكاء الاصطناعي داخل متصفحك.\nأول مرة فقط يتم تحميل النموذج (~50 ميجابايت) وقد تستغرق 1–3 دقائق على الهاتف. بعدها تصبح أسرع. متابعة؟',
+  )
+}
+
 function RemoveBgButton({ image, onDone }: { image?: string; onDone: (id: string) => void }) {
   const url = useMediaURL(image)
   const [busy, setBusy] = useState(false)
@@ -767,12 +780,7 @@ function RemoveBgButton({ image, onDone }: { image?: string; onDone: (id: string
   if (!image || !url) return null
 
   const run = async () => {
-    if (!window.localStorage.getItem('ashour-bg-model')) {
-      const ok = window.confirm(
-        'إزالة الخلفية تعمل بالذكاء الاصطناعي داخل متصفحك.\nأول مرة فقط يتم تحميل النموذج (~50 ميجابايت) وقد تستغرق 1–3 دقائق على الهاتف. بعدها تصبح أسرع. متابعة؟',
-      )
-      if (!ok) return
-    }
+    if (!askBgModelConsent()) return
     setBusy(true)
     setStatus({ label: 'جارٍ تحضير الصورة...' })
     try {
@@ -1291,6 +1299,1319 @@ function LayoutTab() {
             </select>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Image studio ---------------- */
+
+const STUDIO_CHECKER = {
+  backgroundImage: 'repeating-conic-gradient(#e7e2da 0% 25%, #fbf9f6 0% 50%)',
+  backgroundSize: '24px 24px',
+}
+
+function useObjectURL(blob: Blob | null): string {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    if (!blob) {
+      setUrl('')
+      return
+    }
+    const next = URL.createObjectURL(blob)
+    setUrl(next)
+    return () => URL.revokeObjectURL(next)
+  }, [blob])
+  return url
+}
+
+function StudioCompare({
+  before,
+  after,
+  value,
+  onChange,
+}: {
+  before: string
+  after: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const move = (clientX: number) => {
+    const rect = ref.current?.getBoundingClientRect()
+    if (!rect) return
+    onChange(Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)))
+  }
+
+  return (
+    <div>
+      <div
+        ref={ref}
+        className="relative aspect-square w-full touch-none overflow-hidden border border-ink-950/10"
+        style={STUDIO_CHECKER}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          move(e.clientX)
+        }}
+        onPointerMove={(e) => {
+          if (e.buttons) move(e.clientX)
+        }}
+      >
+        <img src={after} alt="بعد" className="pointer-events-none absolute inset-0 h-full w-full object-contain p-3" draggable={false} />
+        <img
+          src={before}
+          alt="قبل"
+          className="pointer-events-none absolute inset-0 h-full w-full object-contain p-3"
+          draggable={false}
+          style={{ clipPath: `inset(0 ${100 - value}% 0 0)` }}
+        />
+        <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-gold-600" style={{ left: `${value}%` }} />
+        <span className="pointer-events-none absolute left-2 top-2 bg-ink-950/80 px-2 py-1 text-[10px] font-bold text-ivory-50">قبل</span>
+        <span className="pointer-events-none absolute right-2 top-2 bg-ink-950/80 px-2 py-1 text-[10px] font-bold text-ivory-50">بعد</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="مقارنة قبل وبعد"
+        className="mt-3 w-full accent-[#8b6914]"
+      />
+      <p className="mt-1 text-center text-[11px] text-ink-500">اسحب الصورة أو المؤشر لمقارنة قبل/بعد</p>
+    </div>
+  )
+}
+
+interface BulkItem {
+  id: string
+  name: string
+  source: Blob
+  result?: Blob
+  status: 'pending' | 'working' | 'done' | 'error'
+  progress?: BgProgress
+  error?: string
+}
+
+function BulkRow({
+  item,
+  disabled,
+  onRemove,
+}: {
+  item: BulkItem
+  disabled: boolean
+  onRemove: () => void
+}) {
+  const sourceUrl = useObjectURL(item.source)
+  const resultUrl = useObjectURL(item.result ?? null)
+  const statusText =
+    item.status === 'pending'
+      ? 'بانتظار المعالجة'
+      : item.status === 'working'
+        ? 'جارٍ إزالة الخلفية...'
+        : item.status === 'done'
+          ? 'جاهزة'
+          : item.error || 'فشلت المعالجة'
+
+  return (
+    <li className="flex flex-wrap items-center gap-3 py-3">
+      <div className="grid size-16 shrink-0 place-items-center overflow-hidden border border-ink-950/10" style={STUDIO_CHECKER}>
+        <img src={resultUrl || sourceUrl} alt="" className="h-full w-full object-contain p-1" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-bold text-ink-950">{item.name}</p>
+        <p className={`text-[11px] ${item.status === 'error' ? 'text-red-700' : 'text-ink-500'}`}>{statusText}</p>
+        {item.status === 'working' && item.progress && (
+          <div className="mt-1">
+            <div className="h-1 overflow-hidden bg-ink-950/10">
+              <div className="h-full bg-gold-600 transition-all" style={{ width: `${item.progress.percent ?? 10}%` }} />
+            </div>
+            <p className="mt-0.5 text-[10px] text-ink-500">{item.progress.label}</p>
+          </div>
+        )}
+      </div>
+      {item.result && (
+        <button
+          onClick={() => downloadBlob(item.result!, `ashour-${item.name.replace(/\.[^.]+$/, '') || 'image'}.png`)}
+          className="grid size-9 place-items-center border border-ink-950/20 text-ink-700 transition hover:bg-ink-950 hover:text-ivory-50"
+          aria-label={`تنزيل ${item.name}`}
+        >
+          <Download size={14} />
+        </button>
+      )}
+      <button
+        onClick={onRemove}
+        disabled={disabled || item.status === 'working'}
+        className="grid size-9 place-items-center border border-red-700/25 text-red-700 transition hover:bg-red-700 hover:text-white disabled:opacity-30"
+        aria-label={`حذف ${item.name}`}
+      >
+        <Trash2 size={14} />
+      </button>
+    </li>
+  )
+}
+
+function BulkStudio() {
+  const [items, setItems] = useState<BulkItem[]>([])
+  const [padding, setPadding] = useState(8)
+  const [aspect, setAspect] = useState<FrameAspect>('1:1')
+  const [background, setBackground] = useState<string | null>(null)
+  const [shadow, setShadow] = useState(false)
+  const [brightness, setBrightness] = useState(100)
+  const [contrast, setContrast] = useState(100)
+  const [saturation, setSaturation] = useState(100)
+  const [processing, setProcessing] = useState(false)
+  const [error, setError] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const stopRef = useRef(false)
+
+  const addFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (list.length === 0) {
+      setError('اختر صوراً بصيغة JPG أو PNG أو WebP.')
+      return
+    }
+    const room = 12 - items.length
+    if (room <= 0) {
+      setError('الحد الأقصى 12 صورة في الدفعة الواحدة.')
+      return
+    }
+    setError('')
+    const picked = list.slice(0, room)
+    const next: BulkItem[] = []
+    for (const f of picked) {
+      try {
+        const blob = await compressImage(f, 1400, 0.9)
+        next.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: f.name,
+          source: blob,
+          status: 'pending',
+        })
+      } catch {
+        /* skip unreadable file */
+      }
+    }
+    setItems((prev) => [...prev, ...next])
+  }
+
+  const start = async () => {
+    if (processing) return
+    const pending = items.filter((x) => x.status === 'pending')
+    if (pending.length === 0) {
+      setError('أضف صوراً جديدة أولاً.')
+      return
+    }
+    if (!askBgModelConsent()) return
+    try {
+      window.localStorage.setItem('ashour-bg-model', '1')
+    } catch {
+      /* ignore */
+    }
+    setProcessing(true)
+    setError('')
+    stopRef.current = false
+    try {
+      for (const item of pending) {
+        if (stopRef.current) break
+        setItems((prev) =>
+          prev.map((x) =>
+            x.id === item.id ? { ...x, status: 'working', progress: { label: 'جارٍ تحضير المحرك...' } } : x,
+          ),
+        )
+        try {
+          const cut = await removeImageBackground(item.source, (p) =>
+            setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, progress: p } : x))),
+          )
+          const result = await trimTransparent(cut, {
+            padding,
+            aspect,
+            background,
+            shadow,
+            brightness,
+            contrast,
+            saturation,
+          })
+          setItems((prev) =>
+            prev.map((x) => (x.id === item.id ? { ...x, status: 'done', result, progress: undefined } : x)),
+          )
+        } catch {
+          setItems((prev) =>
+            prev.map((x) =>
+              x.id === item.id ? { ...x, status: 'error', error: 'فشلت المعالجة', progress: undefined } : x,
+            ),
+          )
+        }
+      }
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const doneCount = items.filter((x) => x.status === 'done').length
+
+  const downloadAll = () => {
+    items
+      .filter((x) => x.result)
+      .forEach((item, i) => {
+        setTimeout(() => downloadBlob(item.result!, `ashour-${i + 1}.png`), i * 600)
+      })
+  }
+
+  return (
+    <div className="mt-5 space-y-4">
+      <div className="border border-ink-950/10 bg-ivory-50 p-4">
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="block text-[11px] font-bold text-ink-600">
+            <span className="flex items-center justify-between">
+              <span>الهامش حول العنصر</span>
+              <span>{padding.toLocaleString('ar-EG')}%</span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={20}
+              value={padding}
+              onChange={(e) => setPadding(Number(e.target.value))}
+              className="w-full accent-[#8b6914]"
+            />
+          </label>
+          <label className="block text-[11px] font-bold text-ink-600">
+            المقاس
+            <select
+              value={aspect}
+              onChange={(e) => setAspect(e.target.value as FrameAspect)}
+              className={`${inp} mt-1 text-xs`}
+            >
+              <option value="original">المقاس الأصلي</option>
+              <option value="1:1">مربع 1:1 — صور المنتجات</option>
+              <option value="4:5">4:5 — إنستغرام</option>
+              <option value="9:16">9:16 — ستوري / ريلز</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-bold text-ink-600">الخلفية</span>
+          <button
+            type="button"
+            onClick={() => setBackground(null)}
+            aria-label="خلفية شفافة"
+            title="شفافة"
+            className={`size-8 border border-ink-950/15 ${background === null ? 'ring-2 ring-gold-600 ring-offset-1' : ''}`}
+            style={STUDIO_CHECKER}
+          />
+          {['#f8f5f3', '#ffffff', '#e7e2da', '#111111'].map((color) => (
+            <button
+              key={color}
+              type="button"
+              onClick={() => setBackground(color)}
+              aria-label={`خلفية ${color}`}
+              title={color}
+              className={`size-8 border border-ink-950/15 ${
+                background?.toLowerCase() === color ? 'ring-2 ring-gold-600 ring-offset-1' : ''
+              }`}
+              style={{ backgroundColor: color }}
+            />
+          ))}
+          <label className="flex items-center gap-1 text-[10px] text-ink-500">
+            لون مخصص
+            <input
+              type="color"
+              value={background ?? '#f8f5f3'}
+              onChange={(e) => setBackground(e.target.value)}
+              className="size-8 cursor-pointer"
+            />
+          </label>
+          <label className="ms-2 flex items-center gap-2 text-xs text-ink-700">
+            <input
+              type="checkbox"
+              checked={shadow}
+              onChange={(e) => setShadow(e.target.checked)}
+              className="size-4 accent-[#8b6914]"
+            />
+            ظل خفيف
+          </label>
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-[11px] font-bold text-ink-600">ضبط الألوان (اختياري)</summary>
+          <div className="mt-2 grid gap-2 md:grid-cols-3">
+            {[
+              { label: 'الإضاءة', value: brightness, onChange: setBrightness },
+              { label: 'التباين', value: contrast, onChange: setContrast },
+              { label: 'التشبع', value: saturation, onChange: setSaturation },
+            ].map((item) => (
+              <label key={item.label} className="block">
+                <span className="flex items-center justify-between text-[10px] font-bold text-ink-600">
+                  <span>{item.label}</span>
+                  <span>{item.value}%</span>
+                </span>
+                <input
+                  type="range"
+                  min={50}
+                  max={150}
+                  value={item.value}
+                  onChange={(e) => item.onChange(Number(e.target.value))}
+                  className="w-full accent-[#8b6914]"
+                />
+              </label>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) void addFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
+
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => fileRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            fileRef.current?.click()
+          }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          if (e.dataTransfer.files) void addFiles(e.dataTransfer.files)
+        }}
+        className={`flex cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 py-8 text-center transition ${
+          dragging ? 'border-gold-600 bg-gold-500/5' : 'border-ink-950/20 bg-white hover:border-gold-600'
+        }`}
+      >
+        <ImagePlus size={28} className="text-gold-600" />
+        <p className="mt-2 text-sm font-bold text-ink-950">أضف عدة صور (حتى 12 صورة)</p>
+        <p className="mt-1 text-[11px] text-ink-500">تُعالج واحدة تلو الأخرى لتوفير ذاكرة الهاتف — PNG / JPG / WebP</p>
+      </div>
+
+      {error && <p className="border border-red-700/20 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+
+      {items.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-bold text-ink-600">
+              {doneCount.toLocaleString('ar-EG')} / {items.length.toLocaleString('ar-EG')} جاهزة
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => void start()}
+                disabled={processing || !items.some((x) => x.status === 'pending')}
+                className="flex items-center gap-1.5 bg-ink-950 px-4 py-2 text-xs font-bold text-ivory-50 transition hover:bg-gold-600 disabled:opacity-40"
+              >
+                <Wand2 size={14} /> {processing ? 'جارٍ المعالجة...' : 'بدء إزالة الخلفية'}
+              </button>
+              {processing && (
+                <button
+                  onClick={() => {
+                    stopRef.current = true
+                  }}
+                  className="border border-red-700/30 px-4 py-2 text-xs font-bold text-red-700 transition hover:bg-red-700 hover:text-white"
+                >
+                  إيقاف بعد الصورة الحالية
+                </button>
+              )}
+              {doneCount > 0 && (
+                <button
+                  onClick={downloadAll}
+                  className="flex items-center gap-1.5 border border-ink-950/20 px-4 py-2 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50"
+                >
+                  <Download size={14} /> تنزيل الكل
+                </button>
+              )}
+              {!processing && (
+                <button
+                  onClick={() => setItems([])}
+                  className="flex items-center gap-1.5 border border-ink-950/20 px-4 py-2 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50"
+                >
+                  <Trash2 size={14} /> مسح القائمة
+                </button>
+              )}
+            </div>
+          </div>
+          <ul className="divide-y divide-ink-950/10 border border-ink-950/10 bg-white px-4">
+            {items.map((item) => (
+              <BulkRow
+                key={item.id}
+                item={item}
+                disabled={processing}
+                onRemove={() => setItems((prev) => prev.filter((x) => x.id !== item.id))}
+              />
+            ))}
+          </ul>
+          <p className="text-[11px] leading-5 text-ink-500">
+            «تنزيل الكل» قد يطلب من المتصفح السماح بتنزيل عدة ملفات. لحفظ صورة في المتجر مباشرة استخدم وضع «صورة واحدة».
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function BrushEditor({
+  image,
+  onApply,
+  onClose,
+}: {
+  image: Blob
+  onApply: (blob: Blob) => void
+  onClose: () => void
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const baseRef = useRef<HTMLCanvasElement | null>(null)
+  const maskRef = useRef<HTMLCanvasElement | null>(null)
+  const lastRef = useRef<{ x: number; y: number } | null>(null)
+  const drawingRef = useRef(false)
+  const historyRef = useRef<ImageData[]>([])
+  const [mode, setMode] = useState<'erase' | 'restore'>('erase')
+  const [size, setSize] = useState(4)
+  const [ready, setReady] = useState(false)
+  const [historyLen, setHistoryLen] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const render = () => {
+    const canvas = canvasRef.current
+    const base = baseRef.current
+    const mask = maskRef.current
+    if (!canvas || !base || !mask) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(base, 0, 0)
+    ctx.globalCompositeOperation = 'destination-in'
+    ctx.drawImage(mask, 0, 0)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  const paint = (x: number, y: number) => {
+    const mask = maskRef.current
+    const canvas = canvasRef.current
+    if (!mask || !canvas) return
+    const ctx = mask.getContext('2d')
+    if (!ctx) return
+    const radius = Math.max(2, (canvas.width * size) / 100)
+    ctx.save()
+    ctx.globalCompositeOperation = mode === 'erase' ? 'destination-out' : 'source-over'
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath()
+    ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const bmp = await createImageBitmap(image)
+        if (cancelled) return
+        const canvas = canvasRef.current
+        if (!canvas) return
+        canvas.width = bmp.width
+        canvas.height = bmp.height
+        const base = document.createElement('canvas')
+        base.width = bmp.width
+        base.height = bmp.height
+        const bctx = base.getContext('2d')
+        if (!bctx) throw new Error()
+        bctx.drawImage(bmp, 0, 0)
+        baseRef.current = base
+
+        const mask = document.createElement('canvas')
+        mask.width = bmp.width
+        mask.height = bmp.height
+        const mctx = mask.getContext('2d')
+        if (!mctx) throw new Error()
+        mctx.fillStyle = '#ffffff'
+        mctx.fillRect(0, 0, mask.width, mask.height)
+        maskRef.current = mask
+
+        render()
+        setReady(true)
+      } catch {
+        if (!cancelled) setError('تعذر فتح محرر الفرشاة.')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image])
+
+  const point = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return null
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    }
+  }
+
+  const undo = () => {
+    const snap = historyRef.current.pop()
+    const mask = maskRef.current
+    if (!snap || !mask) return
+    const ctx = mask.getContext('2d')
+    if (!ctx) return
+    ctx.putImageData(snap, 0, 0)
+    render()
+    setHistoryLen(historyRef.current.length)
+  }
+
+  const apply = async () => {
+    const canvas = canvasRef.current
+    const base = baseRef.current
+    const mask = maskRef.current
+    if (!canvas || !base || !mask) return
+    setBusy(true)
+    setError('')
+    try {
+      const out = document.createElement('canvas')
+      out.width = canvas.width
+      out.height = canvas.height
+      const ctx = out.getContext('2d')
+      if (!ctx) throw new Error()
+      ctx.drawImage(base, 0, 0)
+      ctx.globalCompositeOperation = 'destination-in'
+      ctx.drawImage(mask, 0, 0)
+      ctx.globalCompositeOperation = 'source-over'
+      const blob = await new Promise<Blob | null>((res) => out.toBlob(res, 'image/png'))
+      if (!blob) throw new Error()
+      onApply(blob)
+    } catch {
+      setError('تعذر حفظ التعديل. جرّب مرة أخرى.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-ink-950/70 p-3 sm:p-6" onClick={onClose}>
+      <div
+        className="mx-auto my-4 w-full max-w-3xl border border-ink-950/10 bg-ivory-50 p-4 shadow-2xl sm:p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-royal text-xl font-bold text-ink-950">إصلاح يدوي للخلفية</h3>
+            <p className="mt-1 text-[11px] leading-5 text-ink-500">
+              امسح الأجزاء الزائدة، أو استعد الأجزاء التي مسحتها بالفرشاة. استخدم «تراجع» للعودة خطوة.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="إغلاق"
+            className="grid size-9 shrink-0 place-items-center border border-ink-950/20 text-ink-700 transition hover:bg-ink-950 hover:text-ivory-50"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="mt-3 flex justify-center overflow-hidden border border-ink-950/10 p-2" style={STUDIO_CHECKER}>
+          <canvas
+            ref={canvasRef}
+            className={`${ready ? 'block' : 'hidden'} h-auto max-h-[58vh] w-auto max-w-full touch-none`}
+            onPointerDown={(e) => {
+              const mask = maskRef.current
+              const ctx = mask?.getContext('2d')
+              if (mask && ctx) {
+                historyRef.current.push(ctx.getImageData(0, 0, mask.width, mask.height))
+                if (historyRef.current.length > 3) historyRef.current.shift()
+                setHistoryLen(historyRef.current.length)
+              }
+              e.currentTarget.setPointerCapture(e.pointerId)
+              const p = point(e)
+              if (!p) return
+              drawingRef.current = true
+              lastRef.current = p
+              paint(p.x, p.y)
+              render()
+            }}
+            onPointerMove={(e) => {
+              if (!drawingRef.current) return
+              const p = point(e)
+              if (!p) return
+              const last = lastRef.current
+              const canvas = canvasRef.current
+              if (last && canvas) {
+                const radius = Math.max(2, (canvas.width * size) / 100)
+                const dist = Math.hypot(p.x - last.x, p.y - last.y)
+                const steps = Math.max(1, Math.ceil(dist / Math.max(1, radius / 2)))
+                for (let i = 1; i <= steps; i++) {
+                  paint(last.x + ((p.x - last.x) * i) / steps, last.y + ((p.y - last.y) * i) / steps)
+                }
+              } else {
+                paint(p.x, p.y)
+              }
+              lastRef.current = p
+              render()
+            }}
+            onPointerUp={() => {
+              drawingRef.current = false
+              lastRef.current = null
+            }}
+            onPointerCancel={() => {
+              drawingRef.current = false
+              lastRef.current = null
+            }}
+          />
+          {!ready && <p className="py-16 text-xs text-ink-500">جارٍ تحميل الصورة...</p>}
+        </div>
+
+        {error && <p className="mt-3 border border-red-700/20 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-[auto_1fr] sm:items-center">
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => setMode('erase')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold transition ${
+                mode === 'erase' ? 'bg-ink-950 text-ivory-50' : 'border border-ink-950/20 text-ink-700'
+              }`}
+            >
+              <Eraser size={14} /> مسح
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('restore')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold transition ${
+                mode === 'restore' ? 'bg-ink-950 text-ivory-50' : 'border border-ink-950/20 text-ink-700'
+              }`}
+            >
+              <RotateCcw size={14} /> استعادة
+            </button>
+          </div>
+          <label className="block text-[11px] font-bold text-ink-600">
+            <span className="flex items-center justify-between">
+              <span>حجم الفرشاة</span>
+              <span>{size.toLocaleString('ar-EG')}%</span>
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={15}
+              value={size}
+              onChange={(e) => setSize(Number(e.target.value))}
+              className="w-full accent-[#8b6914]"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-ink-950/10 pt-4">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={historyLen === 0 || busy}
+            className="flex items-center gap-1.5 border border-ink-950/20 px-4 py-2 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50 disabled:opacity-35"
+          >
+            <RotateCcw size={14} /> تراجع
+          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="border border-ink-950/20 px-4 py-2 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="button"
+              onClick={() => void apply()}
+              disabled={!ready || busy}
+              className="bg-gold-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-ink-950 disabled:opacity-40"
+            >
+              {busy ? 'جارٍ الحفظ...' : 'تطبيق التعديل'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StudioTab() {
+  const { data, saveProduct, saveCategory, patchSettings } = useSite()
+  const [source, setSource] = useState<Blob | null>(null)
+  const [cutout, setCutout] = useState<Blob | null>(null)
+  const [final, setFinal] = useState<Blob | null>(null)
+  const sourceUrl = useObjectURL(source)
+  const finalUrl = useObjectURL(final)
+
+  const [padding, setPadding] = useState(8)
+  const [aspect, setAspect] = useState<FrameAspect>('1:1')
+  const [background, setBackground] = useState<string | null>(null)
+  const [shadow, setShadow] = useState(false)
+  const [brightness, setBrightness] = useState(100)
+  const [contrast, setContrast] = useState(100)
+  const [saturation, setSaturation] = useState(100)
+  const [downloadType, setDownloadType] = useState<'png' | 'webp'>('png')
+  const [compare, setCompare] = useState(50)
+  const [removing, setRemoving] = useState(false)
+  const [framing, setFraming] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [progress, setProgress] = useState<BgProgress | null>(null)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [targetType, setTargetType] = useState<'product' | 'category' | 'brand'>('product')
+  const [targetId, setTargetId] = useState('')
+  const [savedRef, setSavedRef] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const [mode, setMode] = useState<'single' | 'bulk'>('single')
+  const [brushOpen, setBrushOpen] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const reset = () => {
+    setSource(null)
+    setCutout(null)
+    setFinal(null)
+    setProgress(null)
+    setError('')
+    setSuccess('')
+    setSavedRef(null)
+    setCompare(50)
+  }
+
+  const loadFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('اختر ملف صورة (JPG أو PNG أو WebP).')
+      return
+    }
+    setError('')
+    setSuccess('')
+    setSavedRef(null)
+    setCutout(null)
+    setFinal(null)
+    setCompare(50)
+    setProgress({ label: 'جارٍ تجهيز الصورة...' })
+    try {
+      const blob = await compressImage(file, 1400, 0.9)
+      setSource(blob)
+    } catch {
+      setError('تعذر قراءة الصورة. جرّب صورة أخرى.')
+    } finally {
+      setProgress(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!cutout) {
+      setFinal(null)
+      setFraming(false)
+      return
+    }
+    let cancelled = false
+    setFraming(true)
+    trimTransparent(cutout, { padding, aspect, background, shadow, brightness, contrast, saturation })
+      .then((blob) => {
+        if (!cancelled) setFinal(blob)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFinal(null)
+          setError('تعذر تجهيز الإطار — جرّب صورة أخرى.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFraming(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [cutout, padding, aspect, background, shadow, brightness, contrast, saturation])
+
+  useEffect(() => {
+    setSavedRef(null)
+  }, [final])
+
+  const removeBackground = async () => {
+    if (!source || removing) return
+    if (!askBgModelConsent()) return
+    setRemoving(true)
+    setError('')
+    setSuccess('')
+    setSavedRef(null)
+    setProgress({ label: 'جارٍ تحضير المحرك...' })
+    try {
+      const result = await removeImageBackground(source, setProgress)
+      setCutout(result)
+      setCompare(50)
+      try {
+        window.localStorage.setItem('ashour-bg-model', '1')
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      setError('تعذر إزالة الخلفية. تحقق من الاتصال وحاول مرة أخرى، أو ارفع صورة PNG شفافة جاهزة.')
+    } finally {
+      setRemoving(false)
+      setProgress(null)
+    }
+  }
+
+  const targets =
+    targetType === 'product'
+      ? data.products.map((p) => ({ id: p.id, label: `${p.name.ar}${p.latin ? ` — ${p.latin}` : ''}` }))
+      : targetType === 'category'
+        ? data.categories.map((c) => ({ id: c.id, label: c.name.ar }))
+        : data.brands.map((b) => ({ id: b, label: b }))
+
+  const saveTarget = async () => {
+    if (!final) {
+      setError('أزل الخلفية أولاً ثم أعد المحاولة.')
+      return
+    }
+    if (!targetId) {
+      setError('اختر المنتج أو التصنيف أو الماركة أولاً.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      let ref = savedRef
+      if (!ref) {
+        const upload = await compressImage(final, 1200, 0.9)
+        if (upload.size > BIG_WARN && !(await confirmSize(upload.size, 'الصورة النهائية'))) return
+        ref = await saveMediaSmart(upload)
+        setSavedRef(ref)
+      }
+
+      if (targetType === 'product') {
+        const product = data.products.find((x) => x.id === targetId)
+        if (!product) throw new Error('المنتج غير موجود')
+        saveProduct({ ...product, image: ref })
+        setSuccess(`تم حفظ الصورة في المنتج «${product.name.ar}».`)
+      } else if (targetType === 'category') {
+        const cat = data.categories.find((x) => x.id === targetId)
+        if (!cat) throw new Error('التصنيف غير موجود')
+        saveCategory({ ...cat, image: ref })
+        setSuccess(`تم حفظ الصورة في التصنيف «${cat.name.ar}».`)
+      } else {
+        const logos = data.settings.brandLogos ?? {}
+        patchSettings({ brandLogos: { ...logos, [targetId]: ref } })
+        setSuccess(`تم حفظ الشعار للماركة «${targetId}».`)
+      }
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'تعذر الحفظ. تأكد من تسجيل الدخول واتصال الإنترنت.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetEdits = () => {
+    setPadding(8)
+    setAspect('1:1')
+    setBackground(null)
+    setShadow(false)
+    setBrightness(100)
+    setContrast(100)
+    setSaturation(100)
+  }
+
+  const download = async () => {
+    if (!final) return
+    setError('')
+    try {
+      const stamp = Date.now()
+      if (downloadType === 'webp') {
+        const blob = await encodeImage(final, 'image/webp', 0.9)
+        downloadBlob(blob, `ashour-image-${stamp}.webp`)
+      } else {
+        downloadBlob(final, `ashour-image-${stamp}.png`)
+      }
+    } catch {
+      setError('تعذر تنزيل الصورة. جرّب مرة أخرى.')
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="border border-ink-950/10 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-royal text-xl font-bold text-ink-950">استوديو الصور</h2>
+            <p className="mt-1 max-w-2xl text-xs leading-6 text-ink-500">
+              ارفع صورة، أزل خلفيتها بالذكاء الاصطناعي، اضبط الإطار والقص، ثم احفظها مباشرة في منتج أو تصنيف أو ماركة — أو نزّلها. الصور الناتجة شفافة.
+            </p>
+          </div>
+          {mode === 'single' && source && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="flex items-center gap-1.5 border border-ink-950/20 px-3 py-2 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50"
+              >
+                <ImagePlus size={14} /> تغيير الصورة
+              </button>
+              <button
+                onClick={reset}
+                className="flex items-center gap-1.5 border border-ink-950/20 px-3 py-2 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50"
+              >
+                <RotateCcw size={14} /> صورة جديدة
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="mb-4 flex w-fit gap-1 border border-ink-950/10 bg-ivory-50 p-1">
+          <button
+            type="button"
+            onClick={() => setMode('single')}
+            className={`px-4 py-2 text-xs font-bold transition ${
+              mode === 'single' ? 'bg-ink-950 text-ivory-50' : 'text-ink-700 hover:bg-ink-950/5'
+            }`}
+          >
+            صورة واحدة
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('bulk')}
+            className={`px-4 py-2 text-xs font-bold transition ${
+              mode === 'bulk' ? 'bg-ink-950 text-ivory-50' : 'text-ink-700 hover:bg-ink-950/5'
+            }`}
+          >
+            دفعة صور
+          </button>
+        </div>
+
+        {mode === 'single' ? (
+          <>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void loadFile(f)
+            e.target.value = ''
+          }}
+        />
+
+        {progress && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between text-xs text-ink-600">
+              <span>{progress.label}</span>
+              {progress.percent != null && <span>{progress.percent.toLocaleString('ar-EG')}%</span>}
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden bg-ink-950/10">
+              <div className="h-full bg-gold-600 transition-all" style={{ width: `${progress.percent ?? 10}%` }} />
+            </div>
+          </div>
+        )}
+
+        {error && <p className="mt-4 border border-red-700/20 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+        {success && (
+          <p className="mt-4 border border-green-700/20 bg-green-50 px-3 py-2 text-xs leading-6 text-green-800">
+            {success}
+            <br />
+            <span className="text-[10px]">لا تنسَ الضغط على «نشر الآن» أعلى اللوحة ليظهر التعديل للزوار.</span>
+          </p>
+        )}
+
+        {!source ? (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => fileRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                fileRef.current?.click()
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragging(true)
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragging(false)
+              const f = e.dataTransfer.files?.[0]
+              if (f) void loadFile(f)
+            }}
+            className={`mt-5 flex cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 py-12 text-center transition ${
+              dragging ? 'border-gold-600 bg-gold-500/5' : 'border-ink-950/20 bg-ivory-50 hover:border-gold-600'
+            }`}
+          >
+            <ImagePlus size={34} className="text-gold-600" />
+            <p className="mt-3 font-bold text-ink-950">اسحب صورة هنا أو اضغط للاختيار</p>
+            <p className="mt-1 text-xs text-ink-500">JPG · PNG · WebP — تُضغط تلقائياً حتى 1400 بكسل</p>
+          </div>
+        ) : (
+          <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <div className="space-y-3">
+              {finalUrl && sourceUrl ? (
+                <StudioCompare before={sourceUrl} after={finalUrl} value={compare} onChange={setCompare} />
+              ) : (
+                <div className="relative aspect-square w-full overflow-hidden border border-ink-950/10" style={STUDIO_CHECKER}>
+                  <img src={sourceUrl} alt="الصورة الأصلية" className="h-full w-full object-contain p-3" />
+                </div>
+              )}
+              {framing && <p className="text-xs text-ink-500">جارٍ تجهيز الإطار...</p>}
+            </div>
+
+            <div className="space-y-4">
+              <div className="border border-ink-950/10 bg-ivory-50 p-4">
+                <p className="text-xs font-bold text-ink-700">1) إزالة الخلفية</p>
+                <button
+                  onClick={() => void removeBackground()}
+                  disabled={removing}
+                  className="mt-3 flex w-full items-center justify-center gap-1.5 bg-ink-950 px-4 py-3 text-xs font-bold text-ivory-50 transition hover:bg-gold-600 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Wand2 size={15} />
+                  {removing ? 'جارٍ إزالة الخلفية...' : cutout ? 'إعادة إزالة الخلفية' : 'إزالة الخلفية بالذكاء الاصطناعي'}
+                </button>
+                <p className="mt-2 text-[11px] leading-5 text-ink-500">
+                  أول استخدام يحمّل النموذج (~50 ميجابايت) مرة واحدة، وقد يستغرق 1–3 دقائق على الهاتف.
+                </p>
+                {cutout && !removing && (
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => setBrushOpen(true)}
+                      className="flex items-center gap-1 text-[11px] font-bold text-gold-700 underline"
+                    >
+                      <Eraser size={12} /> إصلاح يدوي (مسح/استعادة)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCutout(null)
+                        setFinal(null)
+                        setSavedRef(null)
+                        setSuccess('')
+                      }}
+                      className="text-[11px] font-bold text-ink-600 underline"
+                    >
+                      استعادة الصورة الأصلية
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className={`border border-ink-950/10 bg-white p-4 ${cutout ? '' : 'opacity-50'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-ink-700">2) الإطار والخلفية</p>
+                  <button
+                    type="button"
+                    onClick={resetEdits}
+                    disabled={!cutout}
+                    className="text-[11px] font-bold text-ink-500 underline"
+                  >
+                    إعادة ضبط
+                  </button>
+                </div>
+                <label className="mt-3 flex items-center justify-between text-[11px] font-bold text-ink-600">
+                  <span>الهامش حول العنصر</span>
+                  <span>{padding.toLocaleString('ar-EG')}%</span>
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={20}
+                  value={padding}
+                  disabled={!cutout}
+                  onChange={(e) => setPadding(Number(e.target.value))}
+                  className="mt-1 w-full accent-[#8b6914]"
+                />
+                <label className="mt-3 block text-[11px] font-bold text-ink-600">
+                  المقاس
+                  <select
+                    value={aspect}
+                    disabled={!cutout}
+                    onChange={(e) => setAspect(e.target.value as FrameAspect)}
+                    className={`${inp} mt-1 text-xs`}
+                  >
+                    <option value="original">المقاس الأصلي</option>
+                    <option value="1:1">مربع 1:1 — صور المنتجات</option>
+                    <option value="4:5">4:5 — إنستغرام</option>
+                    <option value="9:16">9:16 — ستوري / ريلز</option>
+                  </select>
+                </label>
+                <p className="mt-3 text-[11px] font-bold text-ink-600">الخلفية</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBackground(null)}
+                    aria-label="خلفية شفافة"
+                    title="شفافة"
+                    className={`size-8 border border-ink-950/15 ${background === null ? 'ring-2 ring-gold-600 ring-offset-1' : ''}`}
+                    style={STUDIO_CHECKER}
+                  />
+                  {['#f8f5f3', '#ffffff', '#e7e2da', '#111111'].map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setBackground(color)}
+                      aria-label={`خلفية ${color}`}
+                      title={color}
+                      className={`size-8 border border-ink-950/15 ${
+                        background?.toLowerCase() === color ? 'ring-2 ring-gold-600 ring-offset-1' : ''
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                  <label className="flex items-center gap-1 text-[10px] text-ink-500">
+                    لون مخصص
+                    <input
+                      type="color"
+                      value={background ?? '#f8f5f3'}
+                      onChange={(e) => setBackground(e.target.value)}
+                      className="size-8 cursor-pointer"
+                    />
+                  </label>
+                </div>
+                <label className="mt-3 flex items-center gap-2 text-xs text-ink-700">
+                  <input
+                    type="checkbox"
+                    checked={shadow}
+                    disabled={!cutout}
+                    onChange={(e) => setShadow(e.target.checked)}
+                    className="size-4 accent-[#8b6914]"
+                  />
+                  ظل خفيف تحت العنصر
+                </label>
+                <p className="mt-2 text-[11px] leading-5 text-ink-500">يقص الفراغات الشفافة ويوسّط العنصر تلقائياً.</p>
+              </div>
+
+              <div className={`border border-ink-950/10 bg-white p-4 ${cutout ? '' : 'opacity-50'}`}>
+                <p className="text-xs font-bold text-ink-700">3) ضبط الألوان</p>
+                {[
+                  { label: 'الإضاءة', value: brightness, onChange: setBrightness },
+                  { label: 'التباين', value: contrast, onChange: setContrast },
+                  { label: 'التشبع', value: saturation, onChange: setSaturation },
+                ].map((item) => (
+                  <label key={item.label} className="mt-2 block">
+                    <span className="flex items-center justify-between text-[11px] font-bold text-ink-600">
+                      <span>{item.label}</span>
+                      <span>{item.value.toLocaleString('ar-EG')}%</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={50}
+                      max={150}
+                      value={item.value}
+                      disabled={!cutout}
+                      onChange={(e) => item.onChange(Number(e.target.value))}
+                      className="w-full accent-[#8b6914]"
+                    />
+                  </label>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBrightness(100)
+                    setContrast(100)
+                    setSaturation(100)
+                  }}
+                  disabled={!cutout}
+                  className="mt-2 text-[11px] font-bold text-ink-500 underline"
+                >
+                  إعادة ضبط الألوان
+                </button>
+              </div>
+
+              <div className="border border-ink-950/10 bg-white p-4">
+                <p className="text-xs font-bold text-ink-700">4) الحفظ في المتجر</p>
+                <div className="mt-3 grid gap-2">
+                  <select
+                    value={targetType}
+                    onChange={(e) => {
+                      setTargetType(e.target.value as 'product' | 'category' | 'brand')
+                      setTargetId('')
+                      setError('')
+                      setSuccess('')
+                    }}
+                    className={inp}
+                  >
+                    <option value="product">صورة منتج</option>
+                    <option value="category">صورة تصنيف</option>
+                    <option value="brand">شعار ماركة</option>
+                  </select>
+                  <select
+                    value={targetId}
+                    onChange={(e) => {
+                      setTargetId(e.target.value)
+                      setError('')
+                      setSuccess('')
+                    }}
+                    disabled={targets.length === 0}
+                    className={inp}
+                  >
+                    <option value="">{targets.length === 0 ? 'لا توجد عناصر' : 'اختر...'}</option>
+                    {targets.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => void saveTarget()}
+                  disabled={!final || !targetId || saving || framing}
+                  className="mt-3 flex w-full items-center justify-center gap-1.5 bg-gold-600 px-4 py-3 text-xs font-bold text-white transition hover:bg-ink-950 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Upload size={14} /> {saving ? 'جارٍ الحفظ...' : 'حفظ في المتجر'}
+                </button>
+                <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                  <select
+                    value={downloadType}
+                    onChange={(e) => setDownloadType(e.target.value as 'png' | 'webp')}
+                    className={`${inp} text-xs`}
+                  >
+                    <option value="png">PNG — شفاف</option>
+                    <option value="webp">WebP — شفاف وأصغر</option>
+                  </select>
+                  <button
+                    onClick={() => void download()}
+                    disabled={!final}
+                    className="flex items-center justify-center gap-1.5 border border-ink-950/20 px-4 py-2.5 text-xs font-bold text-ink-800 transition hover:bg-ink-950 hover:text-ivory-50 disabled:opacity-40"
+                  >
+                    <Download size={14} /> تنزيل
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+          </>
+        ) : (
+          <BulkStudio />
+        )}
+      </div>
+
+      {brushOpen && cutout && (
+        <BrushEditor
+          image={cutout}
+          onApply={(blob) => {
+            setCutout(blob)
+            setBrushOpen(false)
+            setSuccess('')
+          }}
+          onClose={() => setBrushOpen(false)}
+        />
+      )}
+
+      <div className="border border-ink-950/10 bg-white p-4 text-xs leading-6 text-ink-500">
+        <b className="text-ink-700">نصائح سريعة:</b> استخدم صوراً واضحة للزجاجة على خلفية بسيطة للحصول على أفضل قص. الهامش 8% مناسب لمعظم صور المنتجات. بعد الحفظ في المتجر اضغط «نشر الآن» أعلى اللوحة.
       </div>
     </div>
   )

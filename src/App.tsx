@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useState, type CSSProperties } from 'react'
 import { SiteProvider, useSite } from './cms/store'
 import type { Product } from './cms/types'
 import { parseHash } from './catalog'
@@ -17,7 +17,7 @@ import PerfumeModal from './components/PerfumeModal'
 import CartDrawer from './components/CartDrawer'
 import WhatsAppFloat from './components/WhatsAppFloat'
 import BackgroundFX from './components/BackgroundFX'
-import Admin from './admin/Admin'
+const Admin = lazy(() => import('./admin/Admin'))
 
 type Cart = Record<string, number>
 
@@ -64,7 +64,18 @@ function Shell() {
     }
   }, [cart])
 
-  if (spec.kind === 'admin') return <Admin />
+  if (spec.kind === 'admin')
+    return (
+      <Suspense
+        fallback={
+          <div className="grid min-h-screen place-items-center bg-ivory-100">
+            <p className="text-sm font-bold text-ink-500">جارٍ تحميل لوحة التحكم...</p>
+          </div>
+        }
+      >
+        <Admin />
+      </Suspense>
+    )
 
   const addToCart = (id: string, qty = 1) => {
     setCart((c) => ({ ...c, [id]: (c[id] ?? 0) + qty }))
