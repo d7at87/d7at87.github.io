@@ -23,10 +23,12 @@ import {
   CloudUpload,
   CloudOff,
   RefreshCw,
+  Wand2,
 } from 'lucide-react'
 import type { Category, Content, LText, Product } from '../cms/types'
 import { useSite } from '../cms/store'
 import { compressImage, saveMediaSmart, useMediaURL } from '../cms/media'
+import { removeImageBackground, type BgProgress } from '../cms/bgRemove'
 import { deleteMedia, listMediaObjects, type MediaObject } from '../cms/remote'
 import BottleSVG from '../components/BottleSVG'
 
@@ -614,9 +616,10 @@ function ProductForm({ initial, onClose }: { initial: Product; onClose: () => vo
                     إزالة الصورة
                   </button>
                 )}
+                <RemoveBgButton image={p.image} onDone={(id) => set('image', id)} />
               </div>
             </div>
-            <p className="mt-2 text-[11px] text-ink-500">تُضغط الصورة تلقائياً وتُحفظ في جهازك — تظهر بدل الزجاجة المرسومة.</p>
+            <p className="mt-2 text-[11px] text-ink-500">تُضغط الصورة تلقائياً وتُحفظ في جهازك — تظهر بدل الزجاجة المرسومة. زر «إزالة الخلفية» يعمل تلقائياً وينتج صورة شفافة.</p>
           </div>
           <div className="md:col-span-2">
             <LPair label="اسم المنتج" value={p.name} onChange={(v) => setL('name', v)} />
@@ -746,6 +749,87 @@ function ProductForm({ initial, onClose }: { initial: Product; onClose: () => vo
 
 /* ---------------- Categories ---------------- */
 
+function RemoveBgButton({ image, onDone }: { image?: string; onDone: (id: string) => void }) {
+  const url = useMediaURL(image)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<BgProgress | null>(null)
+  const [previous, setPrevious] = useState<string | null>(null)
+  const keepPrevious = useRef(false)
+
+  useEffect(() => {
+    if (keepPrevious.current) {
+      keepPrevious.current = false
+      return
+    }
+    setPrevious(null)
+  }, [image])
+
+  if (!image || !url) return null
+
+  const run = async () => {
+    if (!window.localStorage.getItem('ashour-bg-model')) {
+      const ok = window.confirm(
+        'إزالة الخلفية تعمل بالذكاء الاصطناعي داخل متصفحك.\nأول مرة فقط يتم تحميل النموذج (~50 ميجابايت) وقد تستغرق 1–3 دقائق على الهاتف. بعدها تصبح أسرع. متابعة؟',
+      )
+      if (!ok) return
+    }
+    setBusy(true)
+    setStatus({ label: 'جارٍ تحضير الصورة...' })
+    try {
+      const source = await (await fetch(url)).blob()
+      const cutout = await removeImageBackground(source, setStatus)
+      setStatus({ label: 'جارٍ حفظ الصورة...' })
+      const blob = await compressImage(cutout)
+      if (blob.size > BIG_WARN && !(await confirmSize(blob.size, 'الصورة بعد إزالة الخلفية'))) return
+      const saved = await saveMediaSmart(blob)
+      keepPrevious.current = true
+      setPrevious(image)
+      onDone(saved)
+      try {
+        window.localStorage.setItem('ashour-bg-model', '1')
+      } catch {
+        /* ignore */
+      }
+      setStatus(null)
+    } catch {
+      setStatus(null)
+      window.alert(
+        'تعذر إزالة الخلفية. تأكد من الاتصال بالإنترنت وحاول مرة أخرى.\nإن تكرر الخطأ، ارفع صورة PNG بخلفية شفافة جاهزة.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={run}
+          disabled={busy}
+          className="flex items-center gap-1.5 border border-gold-600/40 px-4 py-2 text-xs font-bold text-gold-700 transition hover:bg-gold-600 hover:text-white disabled:cursor-wait disabled:opacity-60"
+        >
+          <Wand2 size={14} /> {busy ? 'جارٍ إزالة الخلفية...' : 'إزالة الخلفية'}
+        </button>
+        {previous && !busy && (
+          <button
+            type="button"
+            onClick={() => {
+              onDone(previous)
+              setPrevious(null)
+            }}
+            className="border border-ink-950/20 px-3 py-2 text-xs font-bold text-ink-700 transition hover:bg-ink-950 hover:text-ivory-50"
+          >
+            تراجع
+          </button>
+        )}
+      </div>
+      {busy && status && <span className="text-[10px] text-ink-500">{status.label}</span>}
+    </div>
+  )
+}
+
 function ImageField({
   label,
   hint,
@@ -801,6 +885,7 @@ function ImageField({
             إزالة
           </button>
         )}
+        <RemoveBgButton image={image} onDone={(id) => onChange(id)} />
       </div>
       <p className="mt-2 text-[11px] text-ink-500">{hint}</p>
     </SRow>

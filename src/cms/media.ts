@@ -102,9 +102,11 @@ export function useMediaURL(ref: string | undefined): string {
   return url
 }
 
-/** Downscale/compress an image to JPEG to keep storage small. */
-export async function compressImage(file: File, maxDim = 900, quality = 0.82): Promise<Blob> {
+/** Downscale/compress an image; keeps transparency for PNG/WebP sources. */
+export async function compressImage(file: File | Blob, maxDim = 900, quality = 0.82): Promise<Blob> {
   try {
+    const sourceType = (file.type || '').toLowerCase()
+    const keepAlpha = /png|webp|gif|svg/.test(sourceType)
     if (file.size < 250 * 1024) return file
     const bmp = await createImageBitmap(file)
     const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height))
@@ -116,7 +118,9 @@ export async function compressImage(file: File, maxDim = 900, quality = 0.82): P
     const ctx = canvas.getContext('2d')
     if (!ctx) return file
     ctx.drawImage(bmp, 0, 0, w, h)
-    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', quality))
+    const blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob(res, keepAlpha ? 'image/webp' : 'image/jpeg', quality),
+    )
     return blob ?? file
   } catch {
     return file
